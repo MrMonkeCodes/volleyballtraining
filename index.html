@@ -27,13 +27,13 @@
       letter-spacing: 2px;
       text-transform: uppercase;
       cursor: pointer;
-      border-bottom: 2px solid transparent;
+      border-bottom: 3px solid transparent;
       transition: all .2s;
     }
     #nav button.active {
       color: #FF4D00;
-      border-bottom: 2px solid #FF4D00;
-      background: #FF4D0010;
+      border-bottom: 3px solid #FF4D00;
+      background: rgba(255,77,0,0.06);
     }
     #root-spike { display: block; }
     #root-vert  { display: none;  }
@@ -42,27 +42,2042 @@
 <body>
 
   <div id="nav">
-    <button class="active" onclick="show('spike', this)">⚡ Spike Power</button>
-    <button onclick="show('vert', this)">📈 Vert Pro</button>
+    <button class="active" onclick="showApp('spike', this)">⚡ Spike Power</button>
+    <button onclick="showApp('vert', this)">📈 Vert Pro</button>
   </div>
 
   <div id="root-spike"></div>
   <div id="root-vert"></div>
 
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.development.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.development.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.2/babel.min.js"></script>
 
-  <script type="text/babel" src="SpikePower.jsx"></script>
-  <script type="text/babel" src="VertPro.jsx"></script>
-
   <script type="text/babel">
-    ReactDOM.createRoot(document.getElementById('root-spike')).render(React.createElement(SpikePower.default));
-    ReactDOM.createRoot(document.getElementById('root-vert')).render(React.createElement(VertPro.default));
+const { useState, useEffect, useRef } = React;
+
+// ── easing & math ─────────────────────────────────────────────────
+const lerp=(a,b,t)=>a+(b-a)*t;
+const lp=(a,b,t)=>({x:lerp(a.x,b.x,t),y:lerp(a.y,b.y,t)});
+const clamp=(v,a,b)=>Math.max(a,Math.min(b,v));
+const sat=(v)=>clamp(v,0,1);
+const easeInOut=t=>t<.5?4*t*t*t:(t-1)*(2*t-2)*(2*t-2)+1;
+const easeOut=t=>1-Math.pow(1-t,3);
+const easeOut4=t=>1-Math.pow(1-t,4);
+const easeIn=t=>t*t*t;
+const easeIn2=t=>t*t;
+const smoothstep=t=>t*t*(3-2*t);
+const smootherstep=t=>t*t*t*(t*(t*6-15)+10);
+const lerpPose=(a,b,t)=>{const o={};for(const k in a)o[k]=lp(a[k],b[k],t);return o;};
+const ang=(a,b)=>Math.atan2(b.y-a.y,b.x-a.x);
+const dist=(a,b)=>Math.hypot(b.x-a.x,b.y-a.y);
+const rot=(p,cx,cy,a)=>({x:cx+(p.x-cx)*Math.cos(a)-(p.y-cy)*Math.sin(a),y:cy+(p.x-cx)*Math.sin(a)+(p.y-cy)*Math.cos(a)});
+
+const SKIN='#c8956c';
+const SKIN_D='#a06b40';
+const SKIN_S='#e8b48a';
+const SHIRT='#2a4a7f';
+const SHIRT_D='#1a2f50';
+const SHIRT_H='#3a6aaf';
+const SHORTS='#1a1a2e';
+const SHORTS_D='#0a0a1a';
+const SHOE='#e8e0d0';
+const SHOE_D='#c8b89a';
+const HAIR='#1a0a00';
+
+function drawBody(ctx, p, opts={}) {
+  const c = ctx;
+  c.save();
+  c.lineCap='round'; c.lineJoin='round';
+  const fill=(col,stroke,sw=1)=>{c.fillStyle=col;if(stroke){c.strokeStyle=stroke;c.lineWidth=sw;}};
+  const seg=(x1,y1,x2,y2,w,col,scol)=>{
+    const a=ang({x:x1,y:y1},{x:x2,y:y2});
+    const p2=a+Math.PI/2;
+    const w1=w, w2=w*.65;
+    c.beginPath();
+    c.moveTo(x1+Math.cos(p2)*w1, y1+Math.sin(p2)*w1);
+    c.quadraticCurveTo((x1+x2)/2+Math.cos(p2)*((w1+w2)/2)*1.1,(y1+y2)/2+Math.sin(p2)*((w1+w2)/2)*1.1,x2+Math.cos(p2)*w2, y2+Math.sin(p2)*w2);
+    c.lineTo(x2-Math.cos(p2)*w2, y2-Math.sin(p2)*w2);
+    c.quadraticCurveTo((x1+x2)/2-Math.cos(p2)*((w1+w2)/2)*1.1,(y1+y2)/2-Math.sin(p2)*((w1+w2)/2)*1.1,x1-Math.cos(p2)*w1, y1-Math.sin(p2)*w1);
+    c.closePath();
+    c.fillStyle=col; c.fill();
+    if(scol){c.strokeStyle=scol;c.lineWidth=.6;c.stroke();}
+  };
+  const oval=(cx,cy,rx,ry,a,col,scol,sw=.6)=>{
+    c.beginPath();c.ellipse(cx,cy,rx,ry,a,0,Math.PI*2);
+    c.fillStyle=col;c.fill();
+    if(scol){c.strokeStyle=scol;c.lineWidth=sw;c.stroke();}
+  };
+  const {sho,hips,neck,head,eL,eR,hL,hR,kL,kR,fL,fR}=p;
+  const torsoW=12, hipW=10;
+  const td=ang(sho,hips);
+  const tp=td+Math.PI/2;
+  c.beginPath();
+  c.moveTo(sho.x+Math.cos(tp)*torsoW, sho.y+Math.sin(tp)*torsoW);
+  c.bezierCurveTo(sho.x+Math.cos(tp)*torsoW+Math.cos(td)*8, sho.y+Math.sin(tp)*torsoW+Math.sin(td)*8,hips.x+Math.cos(tp)*hipW+Math.cos(td)*(-4), hips.y+Math.sin(tp)*hipW+Math.sin(td)*(-4),hips.x+Math.cos(tp)*hipW, hips.y+Math.sin(tp)*hipW);
+  c.lineTo(hips.x-Math.cos(tp)*hipW, hips.y-Math.sin(tp)*hipW);
+  c.bezierCurveTo(hips.x-Math.cos(tp)*hipW+Math.cos(td)*(-4), hips.y-Math.sin(tp)*hipW+Math.sin(td)*(-4),sho.x-Math.cos(tp)*torsoW+Math.cos(td)*8, sho.y-Math.sin(tp)*torsoW+Math.sin(td)*8,sho.x-Math.cos(tp)*torsoW, sho.y-Math.sin(tp)*torsoW);
+  c.closePath();
+  c.fillStyle=SHIRT; c.fill();
+  c.strokeStyle=SHIRT_D; c.lineWidth=.8; c.stroke();
+  c.globalAlpha=.18;
+  c.beginPath();
+  c.moveTo(sho.x+Math.cos(tp)*4, sho.y+Math.sin(tp)*4);
+  c.lineTo(sho.x+Math.cos(tp)*2+Math.cos(td)*6, sho.y+Math.sin(tp)*2+Math.sin(td)*6);
+  c.lineWidth=3; c.strokeStyle=SHIRT_H; c.stroke();
+  c.globalAlpha=1;
+  oval(lerp(neck.x,head.x,.3), lerp(neck.y,head.y,.3), 4, 6, ang(neck,head), SKIN, SKIN_D);
+  seg(hips.x-4, hips.y, kL.x, kL.y, 7.5, SHORTS, SHORTS_D);
+  seg(hips.x+4, hips.y, kR.x, kR.y, 7.5, SHORTS, SHORTS_D);
+  seg(kL.x, kL.y, fL.x, fL.y-4, 5.5, SKIN, SKIN_D);
+  seg(kR.x, kR.y, fR.x, fR.y-4, 5.5, SKIN, SKIN_D);
+  oval(kL.x, kL.y, 5, 4.5, ang(hips,kL), SKIN_S, SKIN_D, .5);
+  oval(kR.x, kR.y, 5, 4.5, ang(hips,kR), SKIN_S, SKIN_D, .5);
+  const drawShoe=(kx,ky,fx,fy,side)=>{
+    const a=ang({x:kx,y:ky},{x:fx,y:fy});
+    c.beginPath();
+    c.ellipse(fx+Math.cos(a)*4, fy+2, 9, 3.5, a*.3, 0, Math.PI*2);
+    c.fillStyle=SHOE_D; c.fill();
+    c.beginPath();
+    c.moveTo(fx-Math.cos(a+Math.PI/2)*4, fy-Math.sin(a+Math.PI/2)*4);
+    c.lineTo(fx+Math.cos(a)*10, fy+Math.sin(a)*5-1);
+    c.lineTo(fx+Math.cos(a)*10+Math.cos(a+Math.PI/2)*3, fy+Math.sin(a)*5+Math.sin(a+Math.PI/2)*3-1);
+    c.lineTo(fx+Math.cos(a+Math.PI/2)*3, fy+Math.sin(a+Math.PI/2)*3);
+    c.closePath();
+    c.fillStyle=SHOE; c.fill(); c.strokeStyle=SHOE_D; c.lineWidth=.6; c.stroke();
+    c.globalAlpha=.35; c.strokeStyle='#888'; c.lineWidth=.5;
+    for(let i=0;i<2;i++){const lx=fx+Math.cos(a)*(3+i*3.5);const ly=fy+Math.sin(a)*(2+i*1.5);c.beginPath(); c.moveTo(lx-2,ly-2); c.lineTo(lx+2,ly-2); c.stroke();}
+    c.globalAlpha=1;
+  };
+  drawShoe(kL.x,kL.y,fL.x,fL.y,0);
+  drawShoe(kR.x,kR.y,fR.x,fR.y,1);
+  seg(sho.x-10, sho.y, eL.x, eL.y, 5, SHIRT, SHIRT_D);
+  seg(sho.x+10, sho.y, eR.x, eR.y, 5, SHIRT, SHIRT_D);
+  oval(sho.x-10, sho.y, 7, 6, ang(sho,eL), SHIRT_H, SHIRT_D, .7);
+  oval(sho.x+10, sho.y, 7, 6, ang(sho,eR), SHIRT_H, SHIRT_D, .7);
+  seg(eL.x, eL.y, hL.x, hL.y, 4, SKIN, SKIN_D);
+  seg(eR.x, eR.y, hR.x, hR.y, 4, SKIN, SKIN_D);
+  oval(eL.x, eL.y, 4, 3.5, ang(sho,eL), SKIN_S, SKIN_D, .5);
+  oval(eR.x, eR.y, 4, 3.5, ang(sho,eR), SKIN_S, SKIN_D, .5);
+  oval(hL.x, hL.y, 4, 3, ang(eL,hL), SKIN, SKIN_D, .6);
+  oval(hR.x, hR.y, 4, 3, ang(eR,hR), SKIN, SKIN_D, .6);
+  oval(head.x, head.y, 10, 11, 0, SKIN, SKIN_D, .8);
+  c.beginPath();
+  c.ellipse(head.x, head.y-5, 10, 8, 0, Math.PI, Math.PI*2);
+  c.fillStyle=HAIR; c.fill();
+  c.globalAlpha=.6;
+  c.beginPath(); c.ellipse(head.x+2, head.y-4, 8, 5, -.2, Math.PI, Math.PI*2);
+  c.fillStyle=HAIR; c.fill(); c.globalAlpha=1;
+  oval(head.x+9, head.y+1, 2.5, 3, 0, SKIN, SKIN_D, .5);
+  oval(head.x+4, head.y+1, 2.5, 2, 0, '#fff', '#999', .4);
+  c.beginPath(); c.arc(head.x+4.5, head.y+1, 1.3, 0, Math.PI*2);
+  c.fillStyle='#2a1a0a'; c.fill();
+  c.beginPath(); c.moveTo(head.x+2, head.y-2); c.lineTo(head.x+7, head.y-2.5);
+  c.strokeStyle=HAIR; c.lineWidth=1; c.stroke();
+  c.beginPath(); c.moveTo(head.x+6, head.y+1); c.quadraticCurveTo(head.x+8, head.y+3, head.x+6, head.y+4);
+  c.strokeStyle=SKIN_D; c.lineWidth=.8; c.stroke();
+  c.beginPath(); c.arc(head.x+5, head.y+6, 2, -.1, Math.PI+.1);
+  c.strokeStyle=SKIN_D; c.lineWidth=.7; c.stroke();
+  c.globalAlpha=.08;
+  c.fillStyle='#fff';
+  c.beginPath(); c.ellipse((fL.x+fR.x)/2, Math.max(fL.y,fR.y)+4, 16, 4, 0, 0, Math.PI*2); c.fill();
+  c.globalAlpha=1;
+  c.restore();
+}
+
+const pose=(cx,gY,cr=0,o={})=>{
+  const hy=gY-52+cr*22, ky=gY-26+cr*12, sy=hy-24;
+  return{head:{x:cx+(o.hx||0), y:sy-22},neck:{x:cx, y:sy-6},sho:{x:cx, y:sy+2},hips:{x:cx, y:hy},kL:{x:cx-8+(o.kLx||0), y:ky+(o.kLy||0)},kR:{x:cx+8+(o.kRx||0), y:ky+(o.kRy||0)},fL:{x:cx-10+(o.fLx||0), y:gY+(o.fLy||0)},fR:{x:cx+10+(o.fRx||0), y:gY+(o.fRy||0)},eL:{x:cx-18+(o.eLx||0), y:sy+16+(o.eLy||0)},eR:{x:cx+18+(o.eRx||0), y:sy+16+(o.eRy||0)},hL:{x:cx-14+(o.hLx||0), y:sy+32+(o.hLy||0)},hR:{x:cx+14+(o.hRx||0), y:sy+32+(o.hRy||0)}};
+};
+const airP=(cx,topY,up=false)=>{
+  const sy=topY+8;
+  return{head:{x:cx, y:topY-4},neck:{x:cx, y:topY+8},sho:{x:cx, y:sy+4},hips:{x:cx, y:sy+28},kL:{x:cx-12, y:sy+46},kR:{x:cx+12, y:sy+46},fL:{x:cx-10, y:sy+62},fR:{x:cx+10, y:sy+62},eL:up?{x:cx-22,y:sy-6}:{x:cx-22,y:sy+20},eR:up?{x:cx+22,y:sy-6}:{x:cx+22,y:sy+20},hL:up?{x:cx-16,y:topY-18}:{x:cx-26,y:sy+34},hR:up?{x:cx+16,y:topY-18}:{x:cx+26,y:sy+34}};
+};
+
+const barbell=(ctx,cx,y)=>{
+  ctx.strokeStyle='#777'; ctx.lineWidth=5; ctx.lineCap='round';
+  ctx.beginPath(); ctx.moveTo(cx-44,y); ctx.lineTo(cx+44,y); ctx.stroke();
+  [[-44,-30],[30,44]].forEach(([a,b])=>{ctx.fillStyle='#444'; ctx.fillRect(cx+a,y-7,b-a,14);ctx.strokeStyle='#666'; ctx.lineWidth=1; ctx.strokeRect(cx+a,y-7,b-a,14);});
+};
+const gnd=(ctx,gY,W,col)=>{
+  ctx.strokeStyle='#2a2a2a'; ctx.lineWidth=1;
+  ctx.beginPath(); ctx.moveTo(0,gY); ctx.lineTo(W,gY); ctx.stroke();
+  ctx.globalAlpha=.03; ctx.strokeStyle=col; ctx.lineWidth=.5;
+  for(let x=0;x<W;x+=14){ctx.beginPath();ctx.moveTo(x,gY);ctx.lineTo(x,gY+2);ctx.stroke();}
+  ctx.globalAlpha=1;
+};
+const box=(ctx,x,y,w,h)=>{
+  ctx.fillStyle='#1e1e1e'; ctx.fillRect(x,y,w,h);
+  ctx.strokeStyle='#3a3a3a'; ctx.lineWidth=1.5; ctx.strokeRect(x,y,w,h);
+  ctx.fillStyle='#252525';
+  for(let i=1;i<3;i++){ctx.fillRect(x,y+h*i/3,w,1);}
+};
+const net=(ctx,nx,topY,gY,col)=>{
+  ctx.strokeStyle='#282828'; ctx.lineWidth=2.5;
+  ctx.beginPath(); ctx.moveTo(nx,topY); ctx.lineTo(nx,gY); ctx.stroke();
+  ctx.strokeStyle='#222'; ctx.lineWidth=.7;
+  for(let y=topY+6;y<gY;y+=8){ctx.beginPath();ctx.moveTo(nx-4,y);ctx.lineTo(nx,y);ctx.stroke();}
+  ctx.strokeStyle=col+'44'; ctx.lineWidth=3;
+  ctx.beginPath(); ctx.moveTo(nx-5,topY); ctx.lineTo(nx+2,topY); ctx.stroke();
+};
+const vball=(ctx,x,y,r,a)=>{
+  ctx.globalAlpha=a;
+  ctx.fillStyle='#ddd'; ctx.beginPath(); ctx.arc(x,y,r,0,Math.PI*2); ctx.fill();
+  ctx.strokeStyle='#999'; ctx.lineWidth=.8; ctx.beginPath(); ctx.arc(x,y,r,0,Math.PI*2); ctx.stroke();
+  ctx.strokeStyle='#888'; ctx.lineWidth=.6;
+  ctx.beginPath(); ctx.moveTo(x-r,y); ctx.quadraticCurveTo(x,y-r*.5,x+r,y); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(x-r*.5,y-r*.85); ctx.quadraticCurveTo(x+r*.6,y,x-r*.5,y+r*.85); ctx.stroke();
+  ctx.globalAlpha=1;
+};
+
+const jumpShadow=(ctx,cx,gY,bodyY,maxH)=>{
+  const frac=sat((gY-bodyY)/maxH);
+  ctx.globalAlpha=lerp(.18,.02,frac);
+  ctx.fillStyle='#aaa';
+  ctx.beginPath(); ctx.ellipse(cx,gY+3,lerp(16,5,frac),3.5,0,0,Math.PI*2); ctx.fill();
+  ctx.globalAlpha=1;
+};
+const ripple=(ctx,cx,gY,age,col)=>{
+  ctx.globalAlpha=sat(1-age)*.35; ctx.strokeStyle=col; ctx.lineWidth=1.2;
+  ctx.beginPath(); ctx.arc(cx,gY,age*26,Math.PI,Math.PI*2); ctx.stroke();
+  ctx.globalAlpha=1;
+};
+const speedLines=(ctx,cx,gY,speed,col)=>{
+  ctx.globalAlpha=speed*.18; ctx.strokeStyle=col; ctx.lineWidth=.8;
+  for(let i=0;i<3;i++){const yo=i*13; ctx.beginPath(); ctx.moveTo(cx-30-i*5,gY-36-yo); ctx.lineTo(cx-18-i*5,gY-36-yo); ctx.stroke();}
+  ctx.globalAlpha=1;
+};
+
+const EXERCISES={
+  "Depth Jumps":{
+    muscles:['quad','calf','glute','hamstring'],
+    howTo:[
+      {step:'Setup', desc:'Stand on a box 12–18 inches high. Step (don\'t jump) off the edge.'},
+      {step:'Land', desc:'Hit the ground with both feet simultaneously, absorbing with soft ankles, knees, and hips.'},
+      {step:'React', desc:'Immediately explode upward as fast as possible — minimize ground contact time.'},
+      {step:'Arms', desc:'Drive both arms up aggressively to add 2–3 inches to your jump height.'},
+      {step:'Reset', desc:'Land softly, walk back to the box, and rest 30–60 seconds between reps.'},
+    ],
+    fn:(ctx,t,col)=>{
+      const W=140,H=180,gY=152,cx=76;
+      ctx.clearRect(0,0,W,H); ctx.fillStyle='#0a0a0a'; ctx.fillRect(0,0,W,H);
+      box(ctx,12,gY-24,52,24); gnd(ctx,gY,W,col);
+      let p;
+      if(t<.10){p=pose(38,gY-24,.05,{hx:1});}
+      else if(t<.22){const v=easeIn2((t-.10)/.12);p=lerpPose(pose(38,gY-24),pose(cx,gY,.2,{eLy:8,eRy:8,hLy:14,hRy:14}),easeOut(v));}
+      else if(t<.38){const v=smootherstep(sat((t-.22)/.16));const cr=lerp(.1,.92,Math.sin(v*Math.PI));const dl=Math.sin(v*Math.PI);p=pose(cx,gY,cr,{eLy:dl*12,eRy:dl*12,hLy:dl*20,hRy:dl*20,hLx:-5,hRx:5});if(v<.55) ripple(ctx,cx,gY,v*.6,col);}
+      else if(t<.54){const v=easeOut4(sat((t-.38)/.16));const cr=lerp(.85,0,v);p=pose(cx,gY,cr,{eLy:lerp(14,-44,v),eRy:lerp(14,-44,v),hLy:lerp(22,-62,v),hRy:lerp(22,-62,v),hLx:-6,hRx:6});ctx.globalAlpha=sat(1-v)*.25; ctx.strokeStyle=col; ctx.lineWidth=1;ctx.beginPath(); ctx.arc(cx,gY,v*22,Math.PI,Math.PI*2); ctx.stroke(); ctx.globalAlpha=1;}
+      else if(t<.80){const v=(t-.54)/.26;const peakH=92, yOff=peakH*4*v*(1-v), bodyY=gY-yOff;jumpShadow(ctx,cx,gY,bodyY,peakH);const tuck=Math.sin(v*Math.PI)*.3;const ap=airP(cx,bodyY-30,true);p={...ap,eL:{x:cx-20,y:ap.sho.y+lerp(-4,14,v*.8)},eR:{x:cx+20,y:ap.sho.y+lerp(-4,14,v*.8)},hL:{x:cx-14,y:ap.sho.y+lerp(-16,8,v*.8)},hR:{x:cx+14,y:ap.sho.y+lerp(-16,8,v*.8)},kL:{x:cx-11-tuck*3,y:ap.kL.y-tuck*10},kR:{x:cx+11+tuck*3,y:ap.kR.y-tuck*10},fL:{x:cx-9,y:ap.fL.y-tuck*16},fR:{x:cx+9,y:ap.fR.y-tuck*16}};if(v>.3&&v<.7){const fade=sat(1-Math.abs(v-.5)/.2);ctx.globalAlpha=fade*.65; ctx.strokeStyle=col; ctx.lineWidth=.8; ctx.setLineDash([2,4]);ctx.beginPath(); ctx.moveTo(cx+30,bodyY-26); ctx.lineTo(cx+30,gY); ctx.stroke();ctx.setLineDash([]); ctx.fillStyle=col; ctx.font='bold 7px monospace';ctx.fillText(Math.round(yOff*.88)+'"',cx+33,bodyY-20); ctx.globalAlpha=1;}}
+      else{const v=smootherstep(sat((t-.80)/.20));const ap=airP(cx,gY-18,true); const lp2=pose(cx,gY,.28);p=lerpPose(ap,lp2,easeOut4(v));if(v>.7) ripple(ctx,cx,gY,(v-.7)/.3,col);jumpShadow(ctx,cx,gY,gY-18*(1-v),80);}
+      drawBody(ctx,p);
+    }
+  },
+  "Box Jumps":{
+    muscles:['quad','glute','calf'],
+    howTo:[
+      {step:'Start Position', desc:'Stand about 1 foot away from the box with feet hip-width apart.'},
+      {step:'Load', desc:'Hinge at your hips and bend your knees into a quarter squat, swinging arms back.'},
+      {step:'Explode', desc:'Drive your arms forward and up while pushing through both feet to launch onto the box.'},
+      {step:'Land Soft', desc:'Land with both feet simultaneously in a soft quarter squat — never land stiff-legged.'},
+      {step:'Step Down', desc:'Always step down (don\'t jump down) to save your joints for the next rep.'},
+    ],
+    fn:(ctx,t,col)=>{
+      const W=140,H=180,gY=152,startX=32,boxX=102,boxTop=gY-36;
+      ctx.clearRect(0,0,W,H); ctx.fillStyle='#0a0a0a'; ctx.fillRect(0,0,W,H);
+      box(ctx,72,boxTop,60,36); gnd(ctx,gY,W,col);
+      let p;
+      if(t<.20){const v=smootherstep(t/.20);p=pose(startX,gY,v*.82,{eLy:lerp(0,16,v),eRy:lerp(0,16,v),hLy:lerp(0,26,v),hRy:lerp(0,26,v),hLx:-5,hRx:5,hx:2});}
+      else if(t<.50){const v=(t-.20)/.30;const px=lerp(startX,boxX,easeOut(v));const peakH=80, yOff=peakH*4*v*(1-v), bodyY=gY-yOff;jumpShadow(ctx,px,gY,bodyY,peakH+20);const ap=airP(px,bodyY-28,true);p={...ap,eL:{x:px-20,y:ap.sho.y+lerp(-18,10,v)},eR:{x:px+20,y:ap.sho.y+lerp(-18,10,v)},hL:{x:px-14,y:ap.sho.y+lerp(-32,6,v)},hR:{x:px+14,y:ap.sho.y+lerp(-32,6,v)},head:{x:px+lerp(0,3,v),y:ap.head.y}};if(v>.3&&v<.72){const fade=Math.sin(sat((v-.3)/.42)*Math.PI);ctx.globalAlpha=fade*.6; ctx.strokeStyle=col; ctx.lineWidth=.8; ctx.setLineDash([2,4]);ctx.beginPath(); ctx.moveTo(px+28,bodyY-22); ctx.lineTo(px+28,gY); ctx.stroke();ctx.setLineDash([]); ctx.fillStyle=col; ctx.font='bold 7px monospace';ctx.fillText(Math.round(peakH*4*v*(1-v)*.9)+'"',px+31,bodyY-16); ctx.globalAlpha=1;}}
+      else if(t<.64){const v=smootherstep(sat((t-.50)/.14));p=pose(boxX,boxTop,lerp(.5,.12,easeOut(v)),{eLy:lerp(8,2,v),eRy:lerp(8,2,v),hLy:lerp(16,4,v),hRy:lerp(16,4,v)});if(v<.55) ripple(ctx,boxX,boxTop,(v/.55)*.7,col);}
+      else if(t<.78){p=pose(boxX,boxTop,lerp(.12,0,easeOut(sat((t-.64)/.14))));}
+      else{p=lerpPose(pose(boxX,boxTop,.05),pose(startX,gY,.04),easeInOut(sat((t-.78)/.22)));}
+      drawBody(ctx,p);
+    }
+  },
+  "Broad Jumps":{
+    muscles:['quad','glute','hamstring','calf'],
+    howTo:[
+      {step:'Setup', desc:'Stand with feet shoulder-width apart, toes at a starting line.'},
+      {step:'Load', desc:'Swing your arms back and drop into a quarter squat simultaneously.'},
+      {step:'Launch', desc:'Explode forward at roughly a 45° angle, driving arms forward and up for momentum.'},
+      {step:'Reach', desc:'Extend your legs forward as you peak, reaching as far as possible with your feet.'},
+      {step:'Land & Measure', desc:'Land with both feet, absorb the force, and measure from your toes to the starting line.'},
+    ],
+    fn:(ctx,t,col)=>{
+      const W=140,H=180,gY=152;
+      ctx.clearRect(0,0,W,H); ctx.fillStyle='#0a0a0a'; ctx.fillRect(0,0,W,H);
+      gnd(ctx,gY,W,col);
+      if(t>.14&&t<.90){const pr=sat((t-.14)/.76);ctx.strokeStyle=col+'1e'; ctx.lineWidth=1; ctx.setLineDash([3,4]);ctx.beginPath(); ctx.moveTo(18,gY+14); ctx.lineTo(18+pr*104,gY+14); ctx.stroke();ctx.setLineDash([]); ctx.fillStyle=col+'55'; ctx.font='8px monospace';ctx.fillText(Math.round(pr*10)+'ft',20+pr*104,gY+12);}
+      let p;
+      if(t<.16){const v=smootherstep(t/.16);p=pose(20,gY,v*.88,{hLy:v*18,hRy:v*18,hLx:-4,hRx:4,hx:2});}
+      else if(t<.52){const v=(t-.16)/.36;const px=lerp(20,118,easeOut(v));const peakH=62, yOff=peakH*4*v*(1-v), bodyY=gY-yOff;jumpShadow(ctx,px,gY,bodyY,peakH+10);const ap=airP(px,bodyY-26,false);p={...ap,head:{x:px+lerp(0,5,v*.7),y:ap.head.y},eL:{x:px-22,y:ap.sho.y+lerp(-10,18,v)},eR:{x:px+22,y:ap.sho.y+lerp(-10,18,v)},hL:{x:px-28,y:ap.sho.y+lerp(-6,32,v)},hR:{x:px+28,y:ap.sho.y+lerp(-6,32,v)}};}
+      else if(t<.68){const v=smootherstep(sat((t-.52)/.16));p=pose(118,gY,lerp(.55,.12,easeOut(v)),{hLy:lerp(18,2,v),hRy:lerp(18,2,v)});if(v<.5) ripple(ctx,118,gY,(v/.5)*.65,col);}
+      else{p=pose(118,gY,lerp(.12,0,easeOut(sat((t-.68)/.32))));}
+      drawBody(ctx,p);
+    }
+  },
+  "Back Squat":{
+    muscles:['quad','glute','hamstring','core'],
+    howTo:[
+      {step:'Bar Position', desc:'Rest the barbell across your upper traps (high bar) or rear delts (low bar). Never on your neck.'},
+      {step:'Stance', desc:'Feet slightly wider than shoulder-width, toes pointed out 15–30°.'},
+      {step:'Brace', desc:'Take a deep breath into your belly, brace your core like you\'re about to get punched.'},
+      {step:'Descend', desc:'Push your knees out over your toes and sit your hips back and down until thighs are at least parallel.'},
+      {step:'Drive Up', desc:'Push the floor away, keep your chest tall, and lock out at the top. Exhale at the top.'},
+    ],
+    fn:(ctx,t,col)=>{
+      const W=140,H=180,cx=70,gY=152;
+      ctx.clearRect(0,0,W,H); ctx.fillStyle='#0a0a0a'; ctx.fillRect(0,0,W,H);
+      gnd(ctx,gY,W,col);
+      const depth=t<.5?smootherstep(t*2):smootherstep((1-t)*2);
+      const p=pose(cx,gY,depth); const by=p.sho.y-3;
+      barbell(ctx,cx,by);
+      ctx.strokeStyle=col+'14'; ctx.lineWidth=1; ctx.setLineDash([3,3]);
+      ctx.beginPath(); ctx.moveTo(10,gY-54+depth*22); ctx.lineTo(130,gY-54+depth*22); ctx.stroke(); ctx.setLineDash([]);
+      drawBody(ctx,{...p,eL:{x:cx-28,y:by+8},eR:{x:cx+28,y:by+8},hL:{x:cx-36,y:by+2},hR:{x:cx+36,y:by+2}});
+    }
+  },
+  "Romanian Deadlift":{
+    muscles:['hamstring','glute','lats'],
+    howTo:[
+      {step:'Grip', desc:'Hold the barbell with an overhand grip just outside your hips, arms straight.'},
+      {step:'Hinge', desc:'Push your hips backward while keeping a slight bend in your knees — this is NOT a squat.'},
+      {step:'Lower', desc:'Lower the bar along your legs until you feel a deep stretch in your hamstrings (usually mid-shin).'},
+      {step:'Flat Back', desc:'Keep your spine neutral the entire time — no rounding. Chest faces the floor, not straight down.'},
+      {step:'Drive Up', desc:'Squeeze your glutes and push your hips forward to return to standing.'},
+    ],
+    fn:(ctx,t,col)=>{
+      const W=140,H=180,cx=70,gY=152;
+      ctx.clearRect(0,0,W,H); ctx.fillStyle='#0a0a0a'; ctx.fillRect(0,0,W,H);
+      gnd(ctx,gY,W,col);
+      const h=t<.5?smootherstep(t*2):smootherstep((1-t)*2), lean=h*.55;
+      const hy=gY-54+h*20, sy=hy-26+h*28;
+      const p={head:{x:cx+lean*22,y:sy-22},neck:{x:cx+lean*16,y:sy-6},sho:{x:cx+lean*14,y:sy+2},hips:{x:cx,y:hy},kL:{x:cx-9,y:gY-26},kR:{x:cx+9,y:gY-26},fL:{x:cx-10,y:gY},fR:{x:cx+10,y:gY},eL:{x:cx+lean*8-5,y:hy+h*12},eR:{x:cx+lean*8+5,y:hy+h*12},hL:{x:cx+lean*14-8,y:hy+20+h*24},hR:{x:cx+lean*14+8,y:hy+20+h*24}};
+      ctx.strokeStyle='#666'; ctx.lineWidth=5; ctx.lineCap='round';
+      ctx.beginPath(); ctx.moveTo(cx-38,p.hL.y); ctx.lineTo(cx+38,p.hL.y); ctx.stroke();
+      [[-38,-24],[24,38]].forEach(([a,b])=>{ctx.fillStyle='#444';ctx.fillRect(cx+a,p.hL.y-7,b-a,14);ctx.strokeStyle='#666';ctx.lineWidth=1;ctx.strokeRect(cx+a,p.hL.y-7,b-a,14);});
+      drawBody(ctx,p);
+    }
+  },
+  "Trap Bar Deadlift":{
+    muscles:['quad','glute','hamstring','lats','core'],
+    howTo:[
+      {step:'Step Inside', desc:'Stand in the center of the trap bar (hex bar) with feet hip-width apart.'},
+      {step:'Hinge & Grip', desc:'Push hips back, bend knees, and grip the handles at your sides. Hips higher than knees.'},
+      {step:'Set Your Back', desc:'Chest up, lats engaged, take a big breath and brace your core before every pull.'},
+      {step:'Drive', desc:'Push the floor away with your legs while your hips and shoulders rise at the same rate.'},
+      {step:'Lock Out', desc:'Stand tall at the top, squeezing glutes. Lower with control — don\'t drop the weight.'},
+    ],
+    fn:(ctx,t,col)=>{
+      const W=140,H=180,cx=70,gY=152;
+      ctx.clearRect(0,0,W,H); ctx.fillStyle='#0a0a0a'; ctx.fillRect(0,0,W,H);
+      gnd(ctx,gY,W,col);
+      const lift=t<.5?easeOut4(t*2):1-easeOut4((t-.5)*2);
+      const p=pose(cx,gY,(1-lift)*.88); const by=p.hips.y+6;
+      ctx.strokeStyle='#666'; ctx.lineWidth=3; ctx.strokeRect(cx-30,by-11,60,22);
+      ctx.strokeStyle='#555'; ctx.lineWidth=4;
+      ctx.beginPath(); ctx.moveTo(cx-44,by); ctx.lineTo(cx-30,by); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(cx+30,by); ctx.lineTo(cx+44,by); ctx.stroke();
+      drawBody(ctx,{...p,hL:{x:cx-30,y:by},hR:{x:cx+30,y:by},eL:{x:cx-22,y:by-10},eR:{x:cx+22,y:by-10}});
+    }
+  },
+  "Jump Squats (light)":{
+    muscles:['quad','glute','calf'],
+    howTo:[
+      {step:'Weight', desc:'Use only 20–30% of your bodyweight (or bodyweight only). This is a speed exercise, not a strength one.'},
+      {step:'Descend', desc:'Drop quickly into a quarter squat — you don\'t need to go deep.'},
+      {step:'Explode', desc:'Drive up as fast as possible, leaving the ground completely. Speed is everything here.'},
+      {step:'Land', desc:'Absorb with soft knees upon landing, then immediately repeat.'},
+      {step:'Intent', desc:'Every single rep should feel like you\'re trying to touch the ceiling. Half-effort negates the benefit.'},
+    ],
+    fn:(ctx,t,col)=>{
+      const W=140,H=180,cx=70,gY=152;
+      ctx.clearRect(0,0,W,H); ctx.fillStyle='#0a0a0a'; ctx.fillRect(0,0,W,H);
+      gnd(ctx,gY,W,col);
+      let p;
+      if(t<.22){const v=smootherstep(t/.22);p=pose(cx,gY,v*.72,{eLy:v*12,eRy:v*12,hLy:v*20,hRy:v*20});}
+      else if(t<.48){const v=(t-.22)/.26;const peakH=58, yOff=peakH*4*v*(1-v), bodyY=gY-yOff;jumpShadow(ctx,cx,gY,bodyY,peakH);const ap=airP(cx,bodyY-28,true);p={...ap,eL:{x:cx-20,y:ap.sho.y+lerp(-4,12,v)},eR:{x:cx+20,y:ap.sho.y+lerp(-4,12,v)},hL:{x:cx-14,y:ap.sho.y+lerp(-18,6,v)},hR:{x:cx+14,y:ap.sho.y+lerp(-18,6,v)}};}
+      else if(t<.62){const v=smootherstep(sat((t-.48)/.14));p=pose(cx,gY,lerp(.5,.08,easeOut(v)));if(v<.55) ripple(ctx,cx,gY,(v/.55)*.6,col);}
+      else{p=pose(cx,gY,lerp(.08,0,easeOut(sat((t-.62)/.38))));}
+      drawBody(ctx,p);
+    }
+  },
+  "Bulgarian Split Squat":{
+    muscles:['quad','glute','hamstring'],
+    howTo:[
+      {step:'Setup', desc:'Place your rear foot on a bench behind you, laces down. Front foot should be 2–3 feet forward.'},
+      {step:'Balance', desc:'Find your balance before adding weight — this takes practice. Use a wall if needed at first.'},
+      {step:'Descend', desc:'Drop your rear knee straight toward the ground, keeping your front shin mostly vertical.'},
+      {step:'Depth', desc:'Lower until your front thigh is parallel to the floor, or as far as flexibility allows.'},
+      {step:'Drive', desc:'Press through your front heel to stand back up. Keep your torso tall throughout.'},
+    ],
+    fn:(ctx,t,col)=>{
+      const W=140,H=180,gY=152;
+      ctx.clearRect(0,0,W,H); ctx.fillStyle='#0a0a0a'; ctx.fillRect(0,0,W,H);
+      box(ctx,82,gY-30,50,16); gnd(ctx,gY,W,col);
+      const depth=t<.5?smootherstep(t*2):smootherstep((1-t)*2);
+      const cx=60, hy=gY-52+depth*24, sy=hy-26;
+      drawBody(ctx,{head:{x:cx,y:sy-22},neck:{x:cx,y:sy-6},sho:{x:cx,y:sy+2},hips:{x:cx,y:hy},kL:{x:cx-18,y:gY-24+depth*10},kR:{x:cx+18,y:hy+20},fL:{x:cx-26,y:gY},fR:{x:cx+22,y:gY-30},eL:{x:cx-18,y:sy+18},eR:{x:cx+18,y:sy+18},hL:{x:cx-14,y:sy+34},hR:{x:cx+14,y:sy+34}});
+    }
+  },
+  "Nordic Curls":{
+    muscles:['hamstring','glute'],
+    howTo:[
+      {step:'Anchor', desc:'Kneel and have a partner hold your ankles, or anchor them under a bar or pad.'},
+      {step:'Lower Slowly', desc:'With a straight body line from knee to head, slowly lower yourself toward the floor using only your hamstrings to control the descent.'},
+      {step:'Catch', desc:'When you can no longer hold, catch yourself with your hands and use a small push to assist back up.'},
+      {step:'Pull Back', desc:'Use your hamstrings to curl your body back to the upright starting position.'},
+      {step:'Progression', desc:'Start with 3–5 reps. This is an extremely difficult exercise — even one rep of controlled lowering is effective.'},
+    ],
+    fn:(ctx,t,col)=>{
+      const W=140,H=180,gY=152;
+      ctx.clearRect(0,0,W,H); ctx.fillStyle='#0a0a0a'; ctx.fillRect(0,0,W,H);
+      box(ctx,4,gY-16,42,16); gnd(ctx,gY,W,col);
+      const lean=t<.42?easeOut4(t/.42)*.76:(.76-easeOut4((t-.42)/.58)*.76);
+      const angle=Math.PI*lean, ax=25, ay=gY-16, bL=68;
+      const bx=ax+Math.sin(angle)*bL, by=ay-Math.cos(angle)*bL;
+      const hx2=bx+Math.sin(angle)*14, hy2=by-Math.cos(angle)*14;
+      const aA=angle+.55, fL2=20;
+      drawBody(ctx,{head:{x:hx2,y:hy2},neck:{x:hx2-Math.sin(angle)*10,y:hy2+Math.cos(angle)*10},sho:{x:bx+Math.sin(angle)*4,y:by-Math.cos(angle)*4},hips:{x:bx,y:by},kL:{x:ax-8,y:gY-10},kR:{x:ax+8,y:gY-10},fL:{x:ax-8,y:gY},fR:{x:ax+8,y:gY},eL:{x:bx-Math.sin(aA)*14,y:by+Math.cos(aA)*14},eR:{x:bx+Math.sin(aA)*6,y:by+Math.cos(aA)*14},hL:{x:bx-Math.sin(aA)*fL2,y:by+Math.cos(aA)*fL2},hR:{x:bx+Math.sin(aA)*(fL2-8),y:by+Math.cos(aA)*fL2}});
+    }
+  },
+  "Single-Leg Hops":{
+    muscles:['calf','quad','glute'],
+    howTo:[
+      {step:'Balance', desc:'Stand on one leg with a slight knee bend. The other leg hangs naturally.'},
+      {step:'Load', desc:'Dip slightly by bending your standing knee — just enough to load the calf and quad.'},
+      {step:'Hop', desc:'Spring off your foot, pushing through your toes. Land on the same foot.'},
+      {step:'Minimize Contact', desc:'The goal is to spend as little time on the ground as possible between hops — like a pogo stick.'},
+      {step:'Direction', desc:'You can hop in place, forward, sideways, or in a pattern. Mix it up for coordination benefits.'},
+    ],
+    fn:(ctx,t,col)=>{
+      const W=140,H=180,gY=152;
+      ctx.clearRect(0,0,W,H); ctx.fillStyle='#0a0a0a'; ctx.fillRect(0,0,W,H);
+      gnd(ctx,gY,W,col);
+      const cx=70+Math.sin(t*Math.PI*2)*34;
+      const airFrac=sat(Math.sin(t*Math.PI*2)*.8+.2);
+      const bodyY=gY-airFrac*52, hy=bodyY-30, sy=hy-26;
+      jumpShadow(ctx,cx,gY,bodyY,60);
+      drawBody(ctx,{head:{x:cx,y:sy-22},neck:{x:cx,y:sy-6},sho:{x:cx,y:sy+2},hips:{x:cx,y:hy},kL:{x:cx-9,y:hy+22},kR:{x:cx+14,y:hy+14},fL:{x:cx-10,y:bodyY},fR:{x:cx+18,y:hy+28},eL:{x:cx-20,y:sy+12+airFrac*10},eR:{x:cx+20,y:sy+12-airFrac*10},hL:{x:cx-24,y:sy+26-airFrac*18},hR:{x:cx+24,y:sy+26+airFrac*18}});
+    }
+  },
+  "Calf Raises (weighted)":{
+    muscles:['calf'],
+    howTo:[
+      {step:'Position', desc:'Stand with the balls of your feet on a raised surface (step, plate, or calf raise machine) so your heels can drop below your toes.'},
+      {step:'Full Stretch', desc:'Let your heels drop as low as possible at the bottom — the full stretch is where gains happen.'},
+      {step:'Rise Slow', desc:'Raise up onto your toes as high as you can, squeezing your calves at the top for 1 second.'},
+      {step:'Control Down', desc:'Lower slowly over 3 seconds. Don\'t bounce at the bottom.'},
+      {step:'Load', desc:'Holding dumbbells or a barbell adds intensity. Even bodyweight on one leg is very challenging.'},
+    ],
+    fn:(ctx,t,col)=>{
+      const W=140,H=180,cx=70,gY=152;
+      ctx.clearRect(0,0,W,H); ctx.fillStyle='#0a0a0a'; ctx.fillRect(0,0,W,H);
+      gnd(ctx,gY,W,col);
+      const rise=(t<.5?smootherstep(t*2):smootherstep((1-t)*2))*20;
+      const p=pose(cx,gY-rise);
+      barbell(ctx,cx,p.sho.y-3);
+      drawBody(ctx,{...p,hL:{x:cx-38,y:p.sho.y+2},hR:{x:cx+38,y:p.sho.y+2},eL:{x:cx-30,y:p.sho.y+8},eR:{x:cx+30,y:p.sho.y+8}});
+    }
+  },
+  "Arm Swing Drills":{
+    muscles:['delt','bicep','tricep'],
+    howTo:[
+      {step:'Start Position', desc:'Stand with feet shoulder-width apart in a slight athletic stance.'},
+      {step:'Elbow Angle', desc:'Keep elbows bent at roughly 90°. Arms should swing like a pendulum, not flap like wings.'},
+      {step:'Back Swing', desc:'Drive one arm forcefully backward until your hand passes your hip — this loads the forward swing.'},
+      {step:'Forward Drive', desc:'Explode the arm forward and up, reaching roughly eye level. Arms should stop at chin height in front.'},
+      {step:'Sync', desc:'Practice syncing opposite arms. Then practice timing both arms together for a two-foot jump takeoff.'},
+    ],
+    fn:(ctx,t,col)=>{
+      const W=140,H=180,cx=70,gY=152;
+      ctx.clearRect(0,0,W,H); ctx.fillStyle='#0a0a0a'; ctx.fillRect(0,0,W,H);
+      gnd(ctx,gY,W,col);
+      const sw=Math.sin(t*Math.PI*2), p=pose(cx,gY);
+      ctx.strokeStyle=col+'0e'; ctx.lineWidth=14; ctx.lineCap='round';
+      ctx.beginPath(); ctx.arc(cx-16,p.sho.y+14,28,-1.4,.9); ctx.stroke();
+      ctx.beginPath(); ctx.arc(cx+16,p.sho.y+14,28,Math.PI-.9,Math.PI+1.4); ctx.stroke();
+      drawBody(ctx,{...p,eL:{x:cx-20-sw*8,y:p.sho.y+12+sw*14},eR:{x:cx+20+sw*8,y:p.sho.y+12-sw*14},hL:{x:cx-16-sw*16,y:p.sho.y-2+sw*26},hR:{x:cx+16+sw*16,y:p.sho.y-2-sw*26}});
+    }
+  },
+  "Max Vertical Jumps":{
+    muscles:['quad','glute','calf','core'],
+    howTo:[
+      {step:'Measurement', desc:'Stand next to a wall with your dominant arm raised — mark your standing reach.'},
+      {step:'Load', desc:'Dip into a comfortable quarter-to-half squat, loading your arms back simultaneously.'},
+      {step:'Explode', desc:'Drive your arms upward while fully extending your ankles, knees, and hips at the same moment.'},
+      {step:'Reach', desc:'At the peak, extend your reaching arm as high as possible and slap or mark the wall.'},
+      {step:'Measure', desc:'Subtract your standing reach from your jump reach — that\'s your vertical. Track it every week.'},
+    ],
+    fn:(ctx,t,col)=>{
+      const W=140,H=180,cx=52,gY=152;
+      ctx.clearRect(0,0,W,H); ctx.fillStyle='#0a0a0a'; ctx.fillRect(0,0,W,H);
+      gnd(ctx,gY,W,col);
+      ctx.strokeStyle='#1e1e1e'; ctx.lineWidth=2; ctx.beginPath(); ctx.moveTo(112,6); ctx.lineTo(112,gY); ctx.stroke();
+      for(let i=0;i<7;i++){ctx.strokeStyle='#2a2a2a';ctx.lineWidth=1;ctx.beginPath();ctx.moveTo(107,14+i*18);ctx.lineTo(112,14+i*18);ctx.stroke();}
+      const arc=t<.5?easeOut4(t*2):easeOut4((1-t)*2);
+      const peakH=84, bodyY=gY-arc*peakH;
+      let p=arc<.18?pose(cx,gY,arc/.18*.86):lerpPose(pose(cx,gY,.86),airP(cx,bodyY-28,true),easeOut4(sat((arc-.18)/.82)));
+      jumpShadow(ctx,cx,gY,bodyY,peakH);
+      if(arc>.7){const dy=bodyY-24;ctx.fillStyle=col;ctx.beginPath();ctx.arc(108,dy,5,0,Math.PI*2);ctx.fill();ctx.strokeStyle=col+'44';ctx.lineWidth=1;ctx.setLineDash([3,3]);ctx.beginPath();ctx.moveTo(p.hR.x,p.hR.y);ctx.lineTo(108,dy);ctx.stroke();ctx.setLineDash([]);ctx.fillStyle=col;ctx.font='bold 8px monospace';ctx.fillText('+6"',113,dy+3);}
+      drawBody(ctx,p);
+    }
+  },
+  "Step-Ups (explosive)":{
+    muscles:['quad','glute'],
+    howTo:[
+      {step:'Height', desc:'Use a box or step that puts your knee at roughly 90° when your foot is on top — typically 12–20 inches.'},
+      {step:'Foot Placement', desc:'Place your entire foot flat on the box. Don\'t let your heel hang off the edge.'},
+      {step:'Drive', desc:'Push through your heel on the box to drive your body upward. The trail leg should only assist minimally.'},
+      {step:'Extend', desc:'Fully lock out your hip at the top — squeeze your glute and stand tall.'},
+      {step:'Control Down', desc:'Step back down with control. Don\'t crash into the ground between reps.'},
+    ],
+    fn:(ctx,t,col)=>{
+      const W=140,H=180,gY=152;
+      ctx.clearRect(0,0,W,H); ctx.fillStyle='#0a0a0a'; ctx.fillRect(0,0,W,H);
+      box(ctx,62,gY-34,68,34); gnd(ctx,gY,W,col);
+      let p;
+      if(t<.30){const v=smootherstep(t/.30);p=lerpPose(pose(48,gY),{...pose(76,gY-34,.28),kR:{x:55,y:gY-18},fR:{x:55,y:gY}},easeOut(v));}
+      else if(t<.55)p=lerpPose(pose(76,gY-34,.28),airP(76,gY-82,true),easeOut4((t-.30)/.25));
+      else if(t<.72)p=lerpPose(airP(76,gY-80,true),pose(76,gY-34),easeOut((t-.55)/.17));
+      else p=pose(76,gY-34,lerp(.18,0,easeOut((t-.72)/.28)));
+      drawBody(ctx,p);
+    }
+  },
+  "Vert Test":{
+    muscles:['quad','glute','calf'],
+    howTo:[
+      {step:'Morning Only', desc:'Test first thing in the morning, before any training. Fatigue can steal 2–4 inches from your result.'},
+      {step:'Stand & Mark', desc:'Stand flat-footed next to a wall and reach up with your dominant arm — mark the highest point.'},
+      {step:'No Approach', desc:'This is a standing vertical — no steps allowed. Feet stay in place until you jump.'},
+      {step:'3 Attempts', desc:'Take 3 full-effort jumps with 60 seconds rest between each. Record only the best attempt.'},
+      {step:'Log It', desc:'Write down the date and result. Progress only becomes visible over weeks — trust the process.'},
+    ],
+    fn:(ctx,t,col)=>{
+      const W=140,H=180,cx=52,gY=152;
+      ctx.clearRect(0,0,W,H); ctx.fillStyle='#0a0a0a'; ctx.fillRect(0,0,W,H);
+      gnd(ctx,gY,W,col);
+      ctx.strokeStyle='#1e1e1e'; ctx.lineWidth=2.5; ctx.beginPath(); ctx.moveTo(114,6); ctx.lineTo(114,gY); ctx.stroke();
+      for(let i=0;i<8;i++){ctx.strokeStyle=i===2?col+'55':'#222';ctx.lineWidth=i===2?1.4:1;ctx.beginPath();ctx.moveTo(108,12+i*16);ctx.lineTo(114,12+i*16);ctx.stroke();}
+      const arc=t<.5?easeOut4(t*2):easeOut4((1-t)*2);
+      const peakH=86, bodyY=gY-arc*peakH;
+      let p=arc<.2?pose(cx,gY,arc/.2*.86):lerpPose(pose(cx,gY,.86),airP(cx,bodyY-28,true),easeOut4(sat((arc-.2)/.8)));
+      jumpShadow(ctx,cx,gY,bodyY,peakH);
+      if(arc>.66){const dy=bodyY-22;ctx.fillStyle=col;ctx.beginPath();ctx.arc(110,dy,5,0,Math.PI*2);ctx.fill();ctx.strokeStyle=col+'44';ctx.lineWidth=1;ctx.beginPath();ctx.moveTo(110,dy);ctx.lineTo(110,12+2*16);ctx.stroke();ctx.fillStyle=col;ctx.font='bold 8px monospace';ctx.fillText('+4"',115,dy+3);}
+      drawBody(ctx,p);
+    }
+  },
+  "Spike Approach":{
+    muscles:['quad','glute','delt','bicep'],
+    howTo:[
+      {step:'4-Step Pattern', desc:'Right-handed: start with your left foot. Pattern is Left → Right → Left-Right (plant). Left-handers mirror this.'},
+      {step:'Angle', desc:'Approach at roughly 45° to the net from behind the attack line. Never run straight at the net.'},
+      {step:'Accelerate', desc:'Each step should be faster than the last. Your final two steps are your power steps.'},
+      {step:'Plant & Load', desc:'Your second-to-last step (right foot) is the longest — it brakes your momentum and loads your jump.'},
+      {step:'Two-Foot Jump', desc:'Jump off both feet simultaneously, not one. Swing both arms up for maximum height.'},
+    ],
+    fn:(ctx,t,col)=>{
+      const W=140,H=180,gY=152;
+      ctx.clearRect(0,0,W,H); ctx.fillStyle='#0a0a0a'; ctx.fillRect(0,0,W,H);
+      gnd(ctx,gY,W,col); net(ctx,116,44,gY,col);
+      let p;
+      if(t<.28){const v=t/.28, cx=lerp(8,74,easeOut(v));const step=v*4, sp=step%1;const bob=Math.abs(Math.sin(sp*Math.PI))*5;const legS=Math.sin(sp*Math.PI*2)*20, armS=Math.sin(sp*Math.PI*2+Math.PI)*24;p={head:{x:cx+3,y:gY-102+bob},neck:{x:cx+2,y:gY-88+bob},sho:{x:cx+1,y:gY-82+bob},hips:{x:cx,y:gY-60+bob*.4},kL:{x:cx-8,y:gY-28+legS*.35},kR:{x:cx+8,y:gY-28-legS*.35},fL:{x:cx-10+legS*.75,y:gY},fR:{x:cx+10-legS*.75,y:gY},eL:{x:cx-18-armS*.45,y:gY-72+bob},eR:{x:cx+18+armS*.45,y:gY-72+bob},hL:{x:cx-14-armS*.9,y:gY-58+bob},hR:{x:cx+14+armS*.9,y:gY-58+bob}};speedLines(ctx,cx,gY,easeOut(v),col);}
+      else if(t<.40){const v=smootherstep(sat((t-.28)/.12)), cx=74;p=pose(cx,gY,v*.82,{eLy:lerp(0,18,v),eRy:lerp(0,18,v),hLy:lerp(0,30,v),hRy:lerp(0,30,v),hLx:-8,hRx:6,hx:2});if(v>.3) ripple(ctx,cx,gY,sat((v-.3)/.7)*.55,col);}
+      else if(t<.64){const v=(t-.40)/.24, cx=74;const peakH=94, yOff=peakH*4*v*(1-v), bodyY=gY-yOff;jumpShadow(ctx,cx,gY,bodyY,peakH);const ap=airP(cx,bodyY-30,false);const nonHit=v<.5?easeOut4(v*2):lerp(1,.8,v);const hitLoad=v>.35?smootherstep(sat((v-.35)/.65)):0;p={...ap,hL:{x:cx-12,y:ap.sho.y-44*nonHit},eL:{x:cx-20,y:ap.sho.y-22*nonHit},hR:{x:cx+14+hitLoad*14,y:ap.sho.y-16+hitLoad*32},eR:{x:cx+22+hitLoad*8,y:ap.sho.y-6+hitLoad*18}};if(v>.45){const ba=smootherstep(sat((v-.45)/.3));vball(ctx,108,gY-104,9,ba*.88);}if(v>.3&&v<.72){const fade=Math.sin(sat((v-.3)/.42)*Math.PI);ctx.globalAlpha=fade*.5; ctx.strokeStyle=col; ctx.lineWidth=.8; ctx.setLineDash([2,4]);ctx.beginPath(); ctx.moveTo(cx+32,bodyY-22); ctx.lineTo(cx+32,gY); ctx.stroke();ctx.setLineDash([]); ctx.fillStyle=col; ctx.font='bold 7px monospace';ctx.fillText(Math.round(yOff*.9)+'"',cx+35,bodyY-16); ctx.globalAlpha=1;}}
+      else if(t<.78){const v=easeOut4(sat((t-.64)/.14)), cx=74;const spikeY=gY-80+v*22, ap=airP(cx,spikeY-28,false);const swing=v;p={...ap,hL:{x:cx-14,y:ap.sho.y-16+swing*12},eL:{x:cx-20,y:ap.sho.y-8+swing*8},hR:{x:cx+28+swing*28,y:ap.sho.y-8+swing*46},eR:{x:cx+22+swing*18,y:ap.sho.y-2+swing*28}};if(v>.25){const bv=sat((v-.25)/.5), bx=lerp(108,132,easeOut(bv)), by=lerp(gY-104,gY-74,easeIn2(bv)), ba=sat(1-bv*1.6);vball(ctx,bx,by,9,ba*.85);ctx.globalAlpha=ba*.35; ctx.strokeStyle=col; ctx.lineWidth=.8; ctx.setLineDash([2,3]);ctx.beginPath(); ctx.moveTo(108,gY-104); ctx.lineTo(bx,by); ctx.stroke();ctx.setLineDash([]); ctx.globalAlpha=1;}else vball(ctx,108,gY-104,9,.88);}
+      else{const v=smootherstep(sat((t-.78)/.22)), cx=74;const fromP={...airP(cx,gY-28,false),hR:{x:cx+42,y:gY-56},eR:{x:cx+36,y:gY-64}};p=lerpPose(fromP,pose(cx,gY,.22),easeOut4(v));if(v<.35) ripple(ctx,cx,gY,(v/.35)*.55,col);}
+      drawBody(ctx,p);
+    }
+  },
+  "Blocking Jumps":{
+    muscles:['quad','glute','delt'],
+    howTo:[
+      {step:'Start Position', desc:'Stand close to the net in an athletic stance — feet shoulder-width, weight on the balls of your feet.'},
+      {step:'Read the Setter', desc:'Watch the setter\'s hands to time your block. Don\'t jump too early.'},
+      {step:'Load', desc:'A quick, shallow dip — your block jump is faster and more reactive than an attack jump.'},
+      {step:'Jump Straight Up', desc:'Jump vertically, not forward into the net. Arms reach up and over the net.'},
+      {step:'Penetrate', desc:'Push your hands and wrists over the net plane, angling fingers down toward the court. Land and reset immediately.'},
+    ],
+    fn:(ctx,t,col)=>{
+      const W=140,H=180,cx=56,gY=152;
+      ctx.clearRect(0,0,W,H); ctx.fillStyle='#0a0a0a'; ctx.fillRect(0,0,W,H);
+      gnd(ctx,gY,W,col); net(ctx,100,28,gY,col);
+      const arc=t<.5?easeOut4(t*2):easeOut4((1-t)*2);
+      const peakH=72, bodyY=gY-arc*peakH, hy=bodyY-30, sy=hy-26;
+      const hU=arc>.44?smootherstep(sat((arc-.44)/.56)):0;
+      const p={head:{x:cx,y:sy-22},neck:{x:cx,y:sy-6},sho:{x:cx,y:sy+2},hips:{x:cx,y:hy},kL:{x:cx-10,y:bodyY-8},kR:{x:cx+10,y:bodyY-8},fL:{x:cx-10,y:bodyY+(1-arc)*22},fR:{x:cx+10,y:bodyY+(1-arc)*22},eL:{x:cx-20,y:sy+4-hU*24},eR:{x:cx+20,y:sy+4-hU*24},hL:{x:cx-16,y:sy-10-hU*32},hR:{x:cx+16,y:sy-10-hU*32}};
+      jumpShadow(ctx,cx,gY,bodyY,peakH);
+      if(hU>.28){ctx.fillStyle=col+'12';ctx.beginPath();ctx.ellipse(cx+4,p.hR.y,24,7,0,0,Math.PI*2);ctx.fill();}
+      drawBody(ctx,p);
+    }
+  },
+  "Lateral Shuffle":{
+    muscles:['quad','glute','calf'],
+    howTo:[
+      {step:'Stance', desc:'Stay in a low athletic stance — hips down, back straight, never let your knees lock out.'},
+      {step:'Push, Don\'t Cross', desc:'Push off the outside foot and bring your feet together, then push again. Never cross your feet.'},
+      {step:'Stay Low', desc:'Your head height should stay constant. If you\'re bobbing up and down, you\'re too slow to react.'},
+      {step:'Quick Feet', desc:'Aim for rapid, small steps rather than big lunges. Fast feet = faster defense.'},
+      {step:'Direction Change', desc:'To reverse direction, plant your outside foot hard and instantly push the other way.'},
+    ],
+    fn:(ctx,t,col)=>{
+      const W=140,H=180,gY=152;
+      ctx.clearRect(0,0,W,H); ctx.fillStyle='#0a0a0a'; ctx.fillRect(0,0,W,H);
+      gnd(ctx,gY,W,col);
+      ctx.strokeStyle=col+'10'; ctx.lineWidth=12; ctx.lineCap='round';
+      ctx.beginPath(); ctx.moveTo(16,gY+16); ctx.lineTo(126,gY+16); ctx.stroke();
+      const cx=70+Math.sin(t*Math.PI*2)*44, dir=Math.cos(t*Math.PI*2);
+      const bob=Math.abs(Math.sin(t*Math.PI*4))*5, step=Math.sin(t*Math.PI*4)*13, hy=gY-50+bob, sy=hy-26;
+      drawBody(ctx,{head:{x:cx+dir*8,y:sy-22},neck:{x:cx+dir*5,y:sy-6},sho:{x:cx+dir*4,y:sy+2},hips:{x:cx,y:hy},kL:{x:cx-10+step,y:gY-24},kR:{x:cx+10-step,y:gY-24},fL:{x:cx-16+step*1.6,y:gY},fR:{x:cx+16-step*1.6,y:gY},eL:{x:cx-20-dir*9,y:sy+14},eR:{x:cx+20+dir*9,y:sy+14},hL:{x:cx-16-dir*16,y:sy+30},hR:{x:cx+16+dir*16,y:sy+30}});
+    }
+  },
+  "Lateral Band Walk":{
+    muscles:['glute','quad'],
+    howTo:[
+      {step:'Band Position', desc:'Place a resistance band just above your ankles or around your knees. Above the ankle is harder.'},
+      {step:'Stance', desc:'Feet hip-width apart in a slight squat. Keep tension on the band — never let your feet come together completely.'},
+      {step:'Step Out', desc:'Step one foot out to the side, maintaining the squat position and keeping tension on the band.'},
+      {step:'Follow', desc:'Bring the trailing foot in — but not all the way. Keep 6–8 inches of space between feet.'},
+      {step:'Feel the Burn', desc:'You should feel this in your glute medius (side of your butt). If you feel it in your quads only, go lower.'},
+    ],
+    fn:(ctx,t,col)=>{
+      const W=140,H=180,gY=152;
+      ctx.clearRect(0,0,W,H); ctx.fillStyle='#0a0a0a'; ctx.fillRect(0,0,W,H);
+      gnd(ctx,gY,W,col);
+      const cx=70+Math.sin(t*Math.PI*2)*34, sp=24+Math.sin(t*Math.PI*4)*9;
+      const fLp={x:cx-sp,y:gY}, fRp={x:cx+sp,y:gY};
+      ctx.shadowColor='#FF3366'; ctx.shadowBlur=6; ctx.strokeStyle='#FF336688'; ctx.lineWidth=4; ctx.lineCap='round';
+      ctx.beginPath(); ctx.moveTo(fLp.x,gY-4); ctx.quadraticCurveTo(cx,gY+13,fRp.x,gY-4); ctx.stroke();
+      ctx.shadowBlur=0;
+      drawBody(ctx,{head:{x:cx,y:gY-102},neck:{x:cx,y:gY-86},sho:{x:cx,y:gY-80},hips:{x:cx,y:gY-58},kL:{x:cx-sp*.6,y:gY-30},kR:{x:cx+sp*.6,y:gY-30},fL:fLp,fR:fRp,eL:{x:cx-20,y:gY-70},eR:{x:cx+20,y:gY-70},hL:{x:cx-16,y:gY-56},hR:{x:cx+16,y:gY-56}});
+    }
+  },
+  "Overhead Press":{
+    muscles:['delt','tricep','trap'],
+    howTo:[
+      {step:'Grip', desc:'Grip just outside shoulder-width. Bar rests on the front of your shoulders (front rack position).'},
+      {step:'Brace', desc:'Big breath, brace your core and glutes. Your lower back should not arch excessively.'},
+      {step:'Press', desc:'Push the bar straight up. As it passes your face, slightly tuck your chin so the bar clears your nose.'},
+      {step:'Lock Out', desc:'At the top, shrug your shoulders up slightly and lock your elbows. The bar should be directly over your mid-foot.'},
+      {step:'Lower', desc:'Bring the bar back to your shoulders with control. Don\'t let it crash down.'},
+    ],
+    fn:(ctx,t,col)=>{
+      const W=140,H=180,cx=70,gY=152;
+      ctx.clearRect(0,0,W,H); ctx.fillStyle='#0a0a0a'; ctx.fillRect(0,0,W,H);
+      gnd(ctx,gY,W,col);
+      const press=t<.5?easeOut4(t*2):easeOut4((1-t)*2);
+      const p=pose(cx,gY), by=p.sho.y-4-press*48;
+      barbell(ctx,cx,by);
+      drawBody(ctx,{...p,eL:{x:cx-26,y:lerp(p.sho.y+16,by+20,press)},eR:{x:cx+26,y:lerp(p.sho.y+16,by+20,press)},hL:{x:cx-36,y:by+4},hR:{x:cx+36,y:by+4}});
+    }
+  },
+  "Hip Flexor Stretch":{
+    muscles:['quad','glute'],
+    howTo:[
+      {step:'Half-Kneeling', desc:'Kneel on one knee (back leg) with your front foot flat on the floor, front knee over your ankle.'},
+      {step:'Tall Spine', desc:'Sit tall — don\'t lean forward. Imagine a string pulling the top of your head toward the ceiling.'},
+      {step:'Tuck & Squeeze', desc:'Tuck your pelvis under (posterior tilt) and squeeze the glute of the back leg. This intensifies the stretch.'},
+      {step:'Breathe Into It', desc:'Take slow deep breaths and relax deeper into the stretch with each exhale. Never force it.'},
+      {step:'Hold', desc:'Hold for 45–60 seconds per side. Daily stretching is needed to see lasting hip flexor flexibility gains.'},
+    ],
+    fn:(ctx,t,col)=>{
+      const W=140,H=180,gY=152;
+      ctx.clearRect(0,0,W,H); ctx.fillStyle='#0a0a0a'; ctx.fillRect(0,0,W,H);
+      gnd(ctx,gY,W,col);
+      const pulse=8+Math.sin(t*Math.PI*5)*4;
+      ctx.strokeStyle='#FF6B3522'; ctx.lineWidth=1; ctx.beginPath(); ctx.arc(78,gY-32,pulse,0,Math.PI*2); ctx.stroke();
+      const cx=58, hy=gY-56, sy=hy-28;
+      drawBody(ctx,{head:{x:cx,y:sy-22},neck:{x:cx,y:sy-6},sho:{x:cx,y:sy+2},hips:{x:cx,y:hy},kL:{x:cx-24,y:gY-22},kR:{x:cx+26,y:gY-4},fL:{x:cx-32,y:gY},fR:{x:cx+24,y:gY},eL:{x:cx-20,y:sy+20},eR:{x:cx+20,y:sy+20},hL:{x:cx-24,y:hy-4},hR:{x:cx+24,y:hy-4}});
+    }
+  },
+  "Wrist Curls":{
+    muscles:['forearm'],
+    howTo:[
+      {step:'Position', desc:'Sit on a bench and rest your forearms on your thighs with palms facing up. Wrists hang just past your knees.'},
+      {step:'Grip', desc:'Hold a light dumbbell or barbell with an underhand (supinated) grip.'},
+      {step:'Lower', desc:'Let the weight roll down your fingers to your fingertips — full extension at the bottom.'},
+      {step:'Curl', desc:'Curl your wrists upward as high as you can, squeezing your forearms at the top.'},
+      {step:'Reverse', desc:'Also do reverse wrist curls (palms down) for balanced forearm strength and injury prevention.'},
+    ],
+    fn:(ctx,t,col)=>{
+      const W=140,H=180,cx=70,gY=152;
+      ctx.clearRect(0,0,W,H); ctx.fillStyle='#0a0a0a'; ctx.fillRect(0,0,W,H);
+      box(ctx,34,gY-20,72,20); gnd(ctx,gY,W,col);
+      const curl=Math.sin(t*Math.PI*2)*15;
+      const p={head:{x:cx,y:gY-114},neck:{x:cx,y:gY-98},sho:{x:cx,y:gY-92},hips:{x:cx,y:gY-20},kL:{x:cx-22,y:gY-20},kR:{x:cx+22,y:gY-20},fL:{x:cx-26,y:gY},fR:{x:cx+26,y:gY},eL:{x:cx-24,y:gY-34},eR:{x:cx+24,y:gY-34},hL:{x:cx-28,y:gY-20+curl},hR:{x:cx+28,y:gY-20+curl}};
+      [[cx-38,cx-18],[cx+18,cx+38]].forEach(([a,b])=>{ctx.strokeStyle='#666';ctx.lineWidth=4;ctx.lineCap='round';ctx.beginPath();ctx.moveTo(a,p.hL.y);ctx.lineTo(b,p.hL.y);ctx.stroke();ctx.fillStyle='#444';ctx.fillRect(a,p.hL.y-5,4,10);ctx.fillRect(b-4,p.hL.y-5,4,10);});
+      drawBody(ctx,p);
+    }
+  },
+  "Pallof Press":{
+    muscles:['core','lats'],
+    howTo:[
+      {step:'Setup', desc:'Attach a band or cable at chest height. Stand sideways to the anchor, feet shoulder-width apart.'},
+      {step:'Hold at Chest', desc:'Hold the band handle at your chest with both hands. The band should already be pulling sideways.'},
+      {step:'Press Out', desc:'Slowly press your hands straight out in front of you. Resist rotating toward the anchor — that\'s the whole point.'},
+      {step:'Hold', desc:'Pause for 1–2 seconds with arms fully extended. Feel your core working to prevent rotation.'},
+      {step:'Return', desc:'Pull your hands back to your chest with control. Do all reps on one side, then switch.'},
+    ],
+    fn:(ctx,t,col)=>{
+      const W=140,H=180,cx=76,gY=152;
+      ctx.clearRect(0,0,W,H); ctx.fillStyle='#0a0a0a'; ctx.fillRect(0,0,W,H);
+      gnd(ctx,gY,W,col);
+      const ext=t<.5?easeOut4(t*2):easeOut4((1-t)*2);
+      const p=pose(cx,gY), ay=p.sho.y+8, hx=lerp(cx-6,cx+30,ext);
+      ctx.strokeStyle='#333'; ctx.lineWidth=8; ctx.lineCap='round'; ctx.beginPath(); ctx.moveTo(0,ay); ctx.lineTo(8,ay); ctx.stroke();
+      ctx.shadowColor='#FFD60A'; ctx.shadowBlur=4; ctx.strokeStyle='#FFD60A44'; ctx.lineWidth=2; ctx.beginPath(); ctx.moveTo(8,ay); ctx.lineTo(hx,ay); ctx.stroke(); ctx.shadowBlur=0;
+      ctx.fillStyle='#FFD60A'; ctx.beginPath(); ctx.arc(hx,ay,5,0,Math.PI*2); ctx.fill();
+      drawBody(ctx,{...p,eL:{x:cx-2,y:ay+4},eR:{x:cx+12,y:ay+4},hL:{x:hx-7,y:ay},hR:{x:hx+7,y:ay}});
+    }
+  },
+  "Plank":{
+    muscles:['core','lats'],
+    howTo:[
+      {step:'Position', desc:'Forearms flat on the ground, elbows directly under your shoulders. Toes tucked under.'},
+      {step:'Body Line', desc:'Form a straight line from your heels to the top of your head — no sagging hips or piked butt.'},
+      {step:'Squeeze Everything', desc:'Flex your quads, squeeze your glutes, brace your core as if taking a punch. All at once.'},
+      {step:'Breathe', desc:'Take slow, controlled breaths. Don\'t hold your breath — that spikes blood pressure unnecessarily.'},
+      {step:'Build Time', desc:'Start with 20–30 seconds done perfectly. A shaky, perfect plank beats a 2-minute sloppy one.'},
+    ],
+    fn:(ctx,t,col)=>{
+      const W=140,H=180,gY=152;
+      ctx.clearRect(0,0,W,H); ctx.fillStyle='#0a0a0a'; ctx.fillRect(0,0,W,H);
+      gnd(ctx,gY,W,col);
+      const wb=Math.sin(t*Math.PI*5)*1.2, by=gY-40+wb;
+      drawBody(ctx,{head:{x:122,y:by-16},neck:{x:116,y:by-6},sho:{x:108,y:by},hips:{x:38,y:by+2},kL:{x:28,y:by+4},kR:{x:24,y:by+6},fL:{x:14,y:gY},fR:{x:18,y:gY},eL:{x:88,y:by+2},eR:{x:80,y:by+2},hL:{x:80,y:gY-4},hR:{x:72,y:gY-4}});
+    }
+  },
+  "Dead Bug":{
+    muscles:['core'],
+    howTo:[
+      {step:'Start', desc:'Lie on your back. Raise arms straight up toward the ceiling and bring knees to 90° (tabletop position).'},
+      {step:'Lower Back Down', desc:'Press your lower back firmly into the floor — this must stay throughout. Use your core to keep it there.'},
+      {step:'Extend Opposite Limbs', desc:'Slowly lower your right arm overhead and extend your left leg out — keeping both just above the floor.'},
+      {step:'Return', desc:'Bring them back to the starting position, then switch sides.'},
+      {step:'Go Slow', desc:'This is a control exercise, not a cardio one. 3–4 seconds out, 3–4 seconds back. Speed kills the benefit.'},
+    ],
+    fn:(ctx,t,col)=>{
+      const W=140,H=180,gY=152;
+      ctx.clearRect(0,0,W,H); ctx.fillStyle='#0a0a0a'; ctx.fillRect(0,0,W,H);
+      gnd(ctx,gY,W,col);
+      const opp=Math.sin(t*Math.PI*2), by=gY-68;
+      drawBody(ctx,{head:{x:18,y:by-4},neck:{x:28,y:by+4},sho:{x:70,y:by+8},hips:{x:70,y:by+44},kL:{x:52,y:by+48-opp*30},kR:{x:88,y:by+48+opp*30},fL:{x:38,y:by+60-opp*34},fR:{x:102,y:by+60+opp*34},eL:{x:52,y:by+12+opp*18},eR:{x:88,y:by+12-opp*18},hL:{x:36,y:by+18+opp*28},hR:{x:104,y:by+18-opp*28}});
+    }
+  },
+  "Rotator Cuff Band":{
+    muscles:['delt','forearm'],
+    howTo:[
+      {step:'Setup', desc:'Anchor a light resistance band at elbow height. Stand sideways to the anchor with the band in your far hand.'},
+      {step:'Tuck Elbow', desc:'Keep your elbow pinned to your side at 90° the entire time — only your forearm moves.'},
+      {step:'External Rotation', desc:'Rotate your forearm away from your body (outward) against the band\'s resistance. Slow and controlled.'},
+      {step:'Return', desc:'Slowly return to the starting position. Don\'t let the band yank you back.'},
+      {step:'Internal Rotation', desc:'Also do the reverse: stand with the anchor on the same side and rotate inward. Both directions matter equally.'},
+    ],
+    fn:(ctx,t,col)=>{
+      const W=140,H=180,cx=70,gY=152;
+      ctx.clearRect(0,0,W,H); ctx.fillStyle='#0a0a0a'; ctx.fillRect(0,0,W,H);
+      gnd(ctx,gY,W,col);
+      const rot=Math.sin(t*Math.PI*2), p=pose(cx,gY);
+      const ex=cx+24, ey=p.sho.y+16, fa=-0.35+rot*1.15;
+      const hx=ex+Math.cos(fa)*24, hy2=ey+Math.sin(fa)*24;
+      ctx.strokeStyle='#2a2a2a'; ctx.lineWidth=2; ctx.beginPath(); ctx.moveTo(0,ey); ctx.lineTo(cx-24,ey); ctx.stroke();
+      ctx.shadowColor='#00FFFF'; ctx.shadowBlur=5; ctx.strokeStyle='#00FFFF77'; ctx.lineWidth=3.5; ctx.beginPath(); ctx.moveTo(cx-24,ey); ctx.lineTo(hx,hy2); ctx.stroke(); ctx.shadowBlur=0;
+      ctx.strokeStyle='#00FFFF14'; ctx.lineWidth=10; ctx.beginPath(); ctx.arc(ex,ey,24,-1.6,.9); ctx.stroke();
+      drawBody(ctx,{...p,eR:{x:ex,y:ey},hR:{x:hx,y:hy2}});
+    }
+  },
+};
+
+function AnimCanvas({exercise,color}){
+  const ref=useRef(null), fr=useRef(0), raf=useRef(null);
+  useEffect(()=>{
+    const canvas=ref.current; if(!canvas)return;
+    const ctx=canvas.getContext('2d');
+    const ex=EXERCISES[exercise];
+    const loop=()=>{ex?.fn(ctx,(fr.current%180)/180,color);fr.current++;raf.current=requestAnimationFrame(loop);};
+    fr.current=0; raf.current=requestAnimationFrame(loop);
+    return()=>cancelAnimationFrame(raf.current);
+  },[exercise,color]);
+  return React.createElement('canvas',{ref,width:140,height:180,style:{display:'block',borderRadius:'3px'}});
+}
+
+const MC={quad:'#FF6B35',hamstring:'#9B5DE5',glute:'#FF3366',calf:'#00B4FF',core:'#FFD60A',lats:'#00FF87',pec:'#FF6B35',delt:'#00FFFF',bicep:'#FF9F1C',tricep:'#C77DFF',forearm:'#4CC9F0',trap:'#06D6A0',spine:'#AAAAAA',bone:'#DDDDDD'};
+
+function MuscleLegend({exercise}){
+  const ex=EXERCISES[exercise];
+  if(!ex?.muscles?.length) return null;
+  return React.createElement('div',{style:{display:'flex',flexWrap:'wrap',gap:'6px',marginTop:'14px'}},
+    ex.muscles.map(m=>React.createElement('div',{key:m,style:{display:'flex',alignItems:'center',gap:'5px',background:'#111',border:`1px solid ${MC[m]}44`,padding:'3px 8px',borderRadius:'2px'}},
+      React.createElement('div',{style:{width:'8px',height:'8px',borderRadius:'50%',background:MC[m],flexShrink:0}}),
+      React.createElement('span',{style:{fontFamily:'monospace',fontSize:'8px',color:MC[m],letterSpacing:'1px',textTransform:'uppercase'}},m)
+    ))
+  );
+}
+
+function HowToSection({exercise, color}){
+  const ex = EXERCISES[exercise];
+  if(!ex?.howTo?.length) return null;
+  return React.createElement('div', {style:{marginTop:'14px'}},
+    React.createElement('div', {style:{fontFamily:'monospace',fontSize:'9px',color:'#444',letterSpacing:'2px',marginBottom:'10px'}}, 'HOW TO DO IT'),
+    ...ex.howTo.map((item, i) =>
+      React.createElement('div', {key:i, style:{display:'flex',gap:'12px',padding:'9px 0',borderBottom: i < ex.howTo.length-1 ? '1px solid #161616' : 'none'}},
+        React.createElement('div', {style:{
+          minWidth:'22px',height:'22px',borderRadius:'50%',
+          background: `${color}22`,
+          border:`1px solid ${color}55`,
+          display:'flex',alignItems:'center',justifyContent:'center',
+          fontFamily:'monospace',fontSize:'9px',fontWeight:'bold',
+          color:color, flexShrink:0, marginTop:'1px'
+        }}, i+1),
+        React.createElement('div', {},
+          React.createElement('div', {style:{fontSize:'11px',fontWeight:'bold',color:'#ddd',marginBottom:'3px',fontFamily:'monospace',letterSpacing:'0.5px'}}, item.step),
+          React.createElement('div', {style:{fontSize:'12px',color:'#888',lineHeight:1.65}}, item.desc)
+        )
+      )
+    )
+  );
+}
+
+function Modal({item,color,onClose}){
+  const [activeTab, setActiveTab] = useState('demo');
+  return React.createElement('div',{onClick:onClose,style:{position:'fixed',inset:0,background:'#000000e8',zIndex:1000,display:'flex',alignItems:'center',justifyContent:'center',padding:'20px'}},
+    React.createElement('div',{onClick:e=>e.stopPropagation(),style:{background:'#0e0e0e',border:`2px solid ${color}`,maxWidth:'390px',width:'100%',padding:'28px 24px',position:'relative',borderRadius:'3px',maxHeight:'90vh',overflowY:'auto'}},
+      React.createElement('button',{onClick:onClose,style:{position:'absolute',top:'14px',right:'18px',background:'none',border:'none',color:'#555',fontSize:'20px',cursor:'pointer'}},'✕'),
+      React.createElement('div',{style:{fontFamily:'monospace',fontSize:'9px',color,letterSpacing:'3px',marginBottom:'6px'}},'EXERCISE GUIDE'),
+      React.createElement('div',{style:{fontSize:'20px',fontWeight:'bold',marginBottom:'2px'}},item.name),
+      React.createElement('div',{style:{fontFamily:'monospace',fontSize:'11px',color:'#444',marginBottom:'16px'}},item.sets),
+
+      // Tab switcher
+      React.createElement('div',{style:{display:'flex',gap:'2px',marginBottom:'16px',background:'#111',padding:'3px',borderRadius:'3px'}},
+        ['demo','how to'].map(tab =>
+          React.createElement('button',{
+            key:tab,
+            onClick:()=>setActiveTab(tab),
+            style:{
+              flex:1, padding:'7px', background: activeTab===tab ? color+'22' : 'transparent',
+              border: activeTab===tab ? `1px solid ${color}55` : '1px solid transparent',
+              color: activeTab===tab ? color : '#555',
+              fontFamily:'monospace', fontSize:'9px', fontWeight:'900',
+              letterSpacing:'2px', textTransform:'uppercase', cursor:'pointer', borderRadius:'2px'
+            }
+          }, tab === 'demo' ? '▶ DEMO' : '📋 HOW TO')
+        )
+      ),
+
+      activeTab === 'demo' && React.createElement('div', {},
+        React.createElement('div',{style:{display:'flex',justifyContent:'center',background:'#080808',border:'1px solid #181818',padding:'18px 28px',marginBottom:'16px',borderRadius:'3px'}},
+          React.createElement(AnimCanvas,{exercise:item.name,color})
+        ),
+        React.createElement(MuscleLegend,{exercise:item.name}),
+        React.createElement('div',{style:{background:'#0a0a0a',border:'1px solid #1a1a1a',borderLeft:`3px solid ${color}`,padding:'16px',marginTop:'14px'}},
+          React.createElement('div',{style:{fontFamily:'monospace',fontSize:'9px',color:'#444',letterSpacing:'2px',marginBottom:'8px'}},'COACHING CUE'),
+          React.createElement('div',{style:{fontSize:'13px',color:'#bbb',lineHeight:1.75}},item.note)
+        )
+      ),
+
+      activeTab === 'how to' && React.createElement('div', {},
+        React.createElement(HowToSection, {exercise: item.name, color}),
+        React.createElement(MuscleLegend,{exercise:item.name}),
+        React.createElement('div',{style:{background:'#0a0a0a',border:'1px solid #1a1a1a',borderLeft:`3px solid ${color}`,padding:'16px',marginTop:'14px'}},
+          React.createElement('div',{style:{fontFamily:'monospace',fontSize:'9px',color:'#444',letterSpacing:'2px',marginBottom:'8px'}},'COACHING CUE'),
+          React.createElement('div',{style:{fontSize:'13px',color:'#bbb',lineHeight:1.75}},item.note)
+        )
+      )
+    )
+  );
+}
+
+function JumpInfo(){
+  const [phase,setPhase]=useState(0);
+  const phases=[
+    {label:'APPROACH',icon:'🏃',color:'#FFD60A',title:'4-Step Attack Approach',desc:'The approach generates the horizontal momentum that becomes vertical lift.',muscles:['quad','glute','calf'],cues:['Angle your approach at 45° to the net','Accelerate through your last two steps','Your last step is your longest','Plant your right foot slightly in front','Keep eyes on the ball the entire approach'],physics:'Horizontal velocity converts to vertical force at takeoff. A proper approach can add 4–8" to your standing reach.'},
+    {label:'PLANT',icon:'⚡',color:'#FF6B35',title:'Two-Foot Plant & Load',desc:'The penultimate step is the power step. Your body lowers and loads the posterior chain.',muscles:['hamstring','glute','quad'],cues:['Heel-to-toe contact on penultimate step','Hips drop 4–6 inches during plant','Arms swing back behind your hips','Knees track over toes','Body leans slightly forward'],physics:'Ground reaction force during plant can exceed 4x bodyweight.'},
+    {label:'TAKEOFF',icon:'🚀',color:'#00FF87',title:'Triple Extension & Arm Drive',desc:'Simultaneous extension of ankle, knee, and hip transfers all stored energy upward.',muscles:['calf','quad','glute'],cues:['Push through the floor','Arm swing adds 2–4"','Reach for maximum height','Explode from heels through toes','Eyes up — contact point is above the net'],physics:'Research shows arms contribute 10–15% of total jump height.'},
+    {label:'AIRTIME',icon:'✋',color:'#00B4FF',title:'Peak Reach & Contact',desc:'At peak height, your arm is fully extended. Timing your swing for contact at the apex is everything.',muscles:['delt','bicep','core'],cues:['Contact the ball at the highest point','Snap your wrist for topspin','Non-hitting arm stabilizes rotation','Eyes open through contact','Shoulder stays high until after contact'],physics:'Every inch of additional reach equals roughly 2–3% more court coverage.'},
+    {label:'LANDING',icon:'🛬',color:'#9B5DE5',title:'Two-Foot Controlled Landing',desc:'Injury prevention begins here. Hard landings transfer 8–10x bodyweight to your joints.',muscles:['quad','calf','hamstring'],cues:['Land on both feet simultaneously','Absorb with 3 joints: ankle, knee, hip','Knees track over toes','Land in athletic position','Never land with locked knees'],physics:'Athletes who land poorly lose 30–40% of explosive ability to injury.'},
+  ];
+  const ph=phases[phase];
+  const M=s=>({fontFamily:'monospace',...s});
+  return React.createElement('div',{style:{padding:'20px'}},
+    React.createElement('div',{style:M({fontSize:'10px',letterSpacing:'4px',color:'#444',marginBottom:'16px'})},'JUMP MECHANICS BREAKDOWN'),
+    React.createElement('div',{style:{display:'flex',gap:'4px',marginBottom:'20px',flexWrap:'wrap'}},
+      phases.map((ph2,i)=>React.createElement('button',{key:i,onClick:()=>setPhase(i),style:{background:phase===i?ph2.color+'22':'#111',border:`1px solid ${phase===i?ph2.color:ph2.color+'33'}`,color:phase===i?ph2.color:ph2.color+'66',padding:'6px 12px',cursor:'pointer',fontFamily:'monospace',fontSize:'9px',letterSpacing:'1px',fontWeight:'900',borderRadius:'2px'}},ph2.icon+' '+ph2.label))
+    ),
+    React.createElement('div',{style:{background:'#111',border:`1px solid ${ph.color}33`,borderLeft:`3px solid ${ph.color}`,padding:'20px',marginBottom:'16px'}},
+      React.createElement('div',{style:{fontSize:'18px',fontWeight:'bold',marginBottom:'6px'}},ph.title),
+      React.createElement('div',{style:{fontSize:'13px',color:'#888',lineHeight:1.7,marginBottom:'16px'}},ph.desc),
+      React.createElement('div',{style:{display:'flex',flexWrap:'wrap',gap:'5px',marginBottom:'16px'}},
+        ph.muscles.map(m=>React.createElement('div',{key:m,style:{display:'flex',alignItems:'center',gap:'5px',background:'#0a0a0a',border:`1px solid ${MC[m]}44`,padding:'3px 8px',borderRadius:'2px'}},
+          React.createElement('div',{style:{width:'7px',height:'7px',borderRadius:'50%',background:MC[m]}}),
+          React.createElement('span',{style:{fontFamily:'monospace',fontSize:'8px',color:MC[m],letterSpacing:'1px',textTransform:'uppercase'}},m)
+        ))
+      ),
+      React.createElement('div',{style:M({fontSize:'9px',color:'#444',letterSpacing:'2px',marginBottom:'10px'})},'COACHING CUES'),
+      ...ph.cues.map((cue,i)=>React.createElement('div',{key:i,style:{display:'flex',gap:'10px',padding:'7px 0',borderBottom:i<ph.cues.length-1?'1px solid #161616':'none',fontSize:'12px',color:'#bbb',lineHeight:1.6}},
+        React.createElement('span',{style:{color:ph.color,fontFamily:'monospace',fontSize:'10px',marginTop:'1px',flexShrink:0}},'→'),cue))
+    ),
+    React.createElement('div',{style:{background:ph.color+'0d',border:`1px solid ${ph.color}22`,padding:'14px 16px',borderRadius:'2px'}},
+      React.createElement('div',{style:M({fontSize:'9px',color:ph.color,letterSpacing:'3px',marginBottom:'8px'})},'THE PHYSICS'),
+      React.createElement('div',{style:{fontSize:'12px',color:'#aaa',lineHeight:1.7}},ph.physics)
+    ),
+    React.createElement('div',{style:{marginTop:'20px',background:'#0f0f0f',border:'1px solid #1e1e1e',padding:'16px'}},
+      React.createElement('div',{style:M({fontSize:'9px',color:'#444',letterSpacing:'3px',marginBottom:'12px'})},'MUSCLE COLOR KEY'),
+      React.createElement('div',{style:{display:'flex',flexWrap:'wrap',gap:'8px'}},
+        Object.entries(MC).filter(([k])=>!['spine','bone'].includes(k)).map(([k,v])=>
+          React.createElement('div',{key:k,style:{display:'flex',alignItems:'center',gap:'5px'}},
+            React.createElement('div',{style:{width:'10px',height:'10px',borderRadius:'2px',background:v,flexShrink:0}}),
+            React.createElement('span',{style:{fontFamily:'monospace',fontSize:'8px',color:'#666',textTransform:'uppercase'}},k)
+          )
+        )
+      )
+    )
+  );
+}
+
+const days=[
+  {day:'MON',full:'Monday',type:'STRENGTH + POWER',intensity:'HIGH',accentColor:'#00FF87',sections:[
+    {label:'PRE-PRACTICE · 20 min',items:[
+      {name:'Depth Jumps',sets:'3x4',note:'Max effort — do these FIRST, completely fresh',priority:true},
+      {name:'Spike Approach',sets:'4x3',note:'Full 4-step approach — drive through both arms on takeoff',priority:true},
+      {name:'Arm Swing Drills',sets:'5 min',note:'Aggressive arm load — syncs with your jump for free inches',priority:false},
+    ]},
+    {label:'POST-PRACTICE · 35 min',items:[
+      {name:'Back Squat',sets:'4x5',note:'Heavy — 80% 1RM. Foundation of your vertical',priority:true},
+      {name:'Romanian Deadlift',sets:'3x6',note:'Slow eccentric — builds posterior chain for explosive jumps',priority:false},
+      {name:'Overhead Press',sets:'3x8',note:'Develops shoulder strength for powerful spikes and serves',priority:false},
+      {name:'Calf Raises (weighted)',sets:'3x15',note:'Full ROM — calves contribute to every jump',priority:false},
+    ]},
+  ]},
+  {day:'TUE',full:'Tuesday',type:'SKILL + CONDITIONING',intensity:'MEDIUM',accentColor:'#FFD60A',sections:[
+    {label:'TRAINING · 35 min',items:[
+      {name:'Spike Approach',sets:'3x5',note:'Focus on hitting zone — approach angle and arm swing timing',priority:true},
+      {name:'Blocking Jumps',sets:'3x6',note:'Explode straight up, hands penetrate over the net',priority:true},
+      {name:'Lateral Shuffle',sets:'4x10m',note:'Stay low — volleyball defense is built on lateral quickness',priority:false},
+      {name:'Hip Flexor Stretch',sets:'2x45s/side',note:'Tight hips kill jump height and spike power',priority:false},
+      {name:'Rotator Cuff Band',sets:'3x15',note:'Prehab for shoulders — every set now prevents months off later',priority:false},
+    ]},
+  ]},
+  {day:'WED',full:'Wednesday',type:'POWER + STRENGTH',intensity:'HIGH',accentColor:'#00FF87',sections:[
+    {label:'PRE-PRACTICE · 15 min',items:[
+      {name:'Box Jumps',sets:'4x4',note:'Land soft, step down — reset fully between reps',priority:true},
+      {name:'Broad Jumps',sets:'3x4',note:'Max distance, explosive intent off the ground',priority:true},
+    ]},
+    {label:'POST-PRACTICE · 35 min',items:[
+      {name:'Trap Bar Deadlift',sets:'4x4',note:'Explosive off the floor — most sport-specific lift for jumpers',priority:true},
+      {name:'Bulgarian Split Squat',sets:'3x8/leg',note:'Fixes leg imbalances — critical for consistent approach jumps',priority:false},
+      {name:'Nordic Curls',sets:'3x5',note:'Bulletproofs hamstrings against spike landing injuries',priority:false},
+      {name:'Pallof Press',sets:'3x12/side',note:'Rotational core stability — generates more power through the ball',priority:false},
+    ]},
+  ]},
+  {day:'THU',full:'Thursday',type:'RECOVERY + MOBILITY',intensity:'LOW',accentColor:'#00B4FF',sections:[
+    {label:'RECOVERY · 35 min',items:[
+      {name:'Arm Swing Drills',sets:'3x10',note:'Groove the pattern while fresh — adds 2–3" on its own',priority:true},
+      {name:'Lateral Band Walk',sets:'3x12/side',note:'Activates glutes for lateral defense and jump stability',priority:false},
+      {name:'Hip Flexor Stretch',sets:'2x60s/side',note:'Full hold — recovery day is the best time to gain flexibility',priority:false},
+      {name:'Dead Bug',sets:'3x8/side',note:'Deep core control — keeps your body tight in the air',priority:false},
+      {name:'Rotator Cuff Band',sets:'2x20',note:'Low resistance shoulder health maintenance',priority:false},
+    ]},
+  ]},
+  {day:'FRI',full:'Friday',type:'EXPLOSIVE + SKILL',intensity:'HIGH',accentColor:'#00FF87',sections:[
+    {label:'PRE-PRACTICE · 20 min',items:[
+      {name:'Depth Jumps',sets:'3x4',note:'From 12" box — minimal ground contact time',priority:true},
+      {name:'Single-Leg Hops',sets:'3x6/leg',note:'Unilateral explosiveness — mirrors real approach mechanics',priority:true},
+      {name:'Blocking Jumps',sets:'3x5',note:'Practice net penetration and timing on every rep',priority:false},
+    ]},
+    {label:'POST-PRACTICE · 25 min',items:[
+      {name:'Jump Squats (light)',sets:'4x5',note:'25% bodyweight — max intent, velocity over load',priority:true},
+      {name:'Step-Ups (explosive)',sets:'3x6/leg',note:'Drive through heel, full hip extension at top',priority:false},
+      {name:'Plank',sets:'3x45s',note:'Lock in the core — transfers force from legs to spike arm',priority:false},
+      {name:'Wrist Curls',sets:'3x15',note:'Forearm strength for snap at ball contact',priority:false},
+    ]},
+  ]},
+  {day:'SAT',full:'Saturday',type:'TEST DAY',intensity:'MEDIUM',accentColor:'#FF6B35',sections:[
+    {label:'TESTING · 30 min',items:[
+      {name:'Vert Test',sets:'3 attempts',note:'Track progress — measure every Saturday morning',priority:true},
+      {name:'Spike Approach',sets:'5 reps',note:'Max effort swings — apply the full week of training',priority:true},
+      {name:'Max Vertical Jumps',sets:'3 reps',note:'Standing vert for comparison alongside approach jump',priority:false},
+      {name:'Hip Flexor Stretch',sets:'15 min',note:'Full body cooldown — you earned it',priority:false},
+    ]},
+  ]},
+  {day:'SUN',full:'Sunday',type:'FULL REST',intensity:'REST',accentColor:'#9B5DE5',sections:[
+    {label:'RECOVERY PROTOCOL',items:[
+      {name:'Dead Bug',sets:'Optional',note:'Gentle movement only — no load',priority:false},
+      {name:'Hip Flexor Stretch',sets:'10 min',note:'Light stretching to keep blood moving',priority:false},
+      {name:'Plank',sets:'1x30s',note:'Single set max — just to stay connected',priority:false},
+    ]},
+  ]},
+];
+
+const mlColors=['#00FF87','#FFD60A','#FF6B35','#9B5DE5'];
+const milestones=[{weeks:'1–3',target:'22–23"',focus:'Technique + neural adaptation'},{weeks:'4–6',target:'24–26"',focus:'Strength gains translating'},{weeks:'7–9',target:'26–28"',focus:'Plyometric power peaks'},{weeks:'10–12',target:'28–30"+',focus:'Full system integration'}];
+const rules=[
+  {icon:'⚡',rule:'Plyo BEFORE practice, lifts AFTER',why:'You need full CNS freshness for max-effort jumps',color:'#00FF87'},
+  {icon:'🚫',rule:'Never lift heavy the day before a game',why:'Fatigue destroys explosiveness — time it right',color:'#FF4444'},
+  {icon:'😴',rule:'Sunday is sacred',why:'Elite athletes improve on rest days, not training days',color:'#9B5DE5'},
+  {icon:'📏',rule:'Measure every Saturday morning',why:'Track gains or adjust program accordingly',color:'#FFD60A'},
+  {icon:'🏐',rule:'Skill work counts as training volume',why:'Spike reps and blocking drills are CNS load',color:'#FF6B35'},
+  {icon:'💪',rule:'Protect your shoulders every week',why:'Rotator cuff work is non-optional for spikers',color:'#00B4FF'},
+];
+
+function VertPro(){
+  const [activeDay,setActiveDay]=useState(0);
+  const [tab,setTab]=useState('schedule');
+  const [checked,setChecked]=useState({});
+  const [modal,setModal]=useState(null);
+  const cur=days[activeDay];
+  const toggle=k=>setChecked(p=>({...p,[k]:!p[k]}));
+  const allItems=cur.sections.flatMap((s,si)=>s.items.map((item,ii)=>({item,key:`${activeDay}-${si}-${ii}`})));
+  const done=allItems.filter(({key})=>checked[key]).length;
+  const pct=allItems.length>0?Math.round(done/allItems.length*100):0;
+  const badge={HIGH:{bg:'#00FF8718',color:'#00FF87',label:'HIGH LOAD'},MEDIUM:{bg:'#FFD60A18',color:'#FFD60A',label:'MODERATE'},LOW:{bg:'#00B4FF18',color:'#00B4FF',label:'RECOVERY'},REST:{bg:'#9B5DE518',color:'#9B5DE5',label:'FULL REST'}}[cur.intensity];
+  const M=s=>({fontFamily:'monospace',...s});
+
+  return (
+    <div style={{minHeight:'100vh',background:'#080808',color:'#eee',fontFamily:'Georgia,serif',maxWidth:'680px',margin:'0 auto'}}>
+      {modal&&<Modal item={modal} color={cur.accentColor} onClose={()=>setModal(null)}/>}
+      <div style={{background:'#0f0f0f',padding:'28px 24px 0',borderBottom:`3px solid ${cur.accentColor}`}}>
+        <div style={M({fontSize:'10px',letterSpacing:'4px',color:'#444',marginBottom:'6px'})}>VOLLEYBALL ATHLETE PROGRAM · WEEKLY SCHEDULE</div>
+        <div style={{fontSize:'26px',fontWeight:'bold',lineHeight:1.1,marginBottom:'20px'}}>
+          20″ → <span style={{color:cur.accentColor,fontStyle:'italic'}}>30″+ VERT</span>
+          <div style={M({fontSize:'11px',color:'#555',fontStyle:'normal',marginTop:'4px',letterSpacing:'2px'})}>VOLLEYBALL-SPECIFIC TRAINING SYSTEM</div>
+        </div>
+        <div style={{display:'flex',overflowX:'auto',scrollbarWidth:'none'}}>
+          {['schedule','jump info','milestones','rules'].map(t=>(
+            <button key={t} onClick={()=>setTab(t)} style={{padding:'10px 16px',background:tab===t?cur.accentColor:'transparent',color:tab===t?'#000':'#555',border:'none',cursor:'pointer',fontSize:'10px',fontFamily:'monospace',fontWeight:'900',letterSpacing:'2px',textTransform:'uppercase',whiteSpace:'nowrap'}}>{t}</button>
+          ))}
+        </div>
+      </div>
+
+      {tab==='jump info'&&<JumpInfo/>}
+
+      {tab==='schedule'&&<>
+        <div style={{display:'flex',overflowX:'auto',background:'#0c0c0c',borderBottom:'1px solid #1a1a1a',scrollbarWidth:'none'}}>
+          {days.map((d,i)=>(
+            <button key={i} onClick={()=>setActiveDay(i)} style={{flex:'0 0 auto',padding:'14px 16px',background:activeDay===i?'#1a1a1a':'transparent',borderTop:'none',borderLeft:'none',borderRight:'none',borderBottom:activeDay===i?`2px solid ${d.accentColor}`:'2px solid transparent',color:activeDay===i?d.accentColor:'#444',cursor:'pointer',fontFamily:'monospace',fontSize:'10px',fontWeight:'900',letterSpacing:'1px',minWidth:'64px',textAlign:'center'}}>
+              <div>{d.day}</div>
+              <div style={{fontSize:'8px',marginTop:'3px',opacity:.7}}>{d.intensity==='REST'?'REST':d.intensity==='LOW'?'EASY':d.intensity==='HIGH'?'HARD':'MED'}</div>
+            </button>
+          ))}
+        </div>
+        {cur.intensity!=='REST'&&(
+          <div style={{padding:'14px 20px 0',background:'#0c0c0c'}}>
+            <div style={{display:'flex',justifyContent:'space-between',marginBottom:'6px'}}>
+              <span style={M({fontSize:'9px',color:'#444',letterSpacing:'2px'})}>TODAY'S PROGRESS</span>
+              <span style={M({fontSize:'9px',color:cur.accentColor})}>{done}/{allItems.length} DONE</span>
+            </div>
+            <div style={{height:'3px',background:'#1a1a1a',borderRadius:'2px'}}>
+              <div style={{height:'100%',width:`${pct}%`,background:cur.accentColor,borderRadius:'2px',transition:'width .4s'}}/>
+            </div>
+          </div>
+        )}
+        <div style={{padding:'20px 20px 40px'}}>
+          <div style={{display:'flex',alignItems:'flex-start',justifyContent:'space-between',marginBottom:'24px'}}>
+            <div>
+              <div style={{fontSize:'22px',fontWeight:'bold'}}>{cur.full}</div>
+              <div style={M({fontSize:'11px',color:'#555',letterSpacing:'2px',marginTop:'4px'})}>{cur.type}</div>
+            </div>
+            <div style={{background:badge.bg,color:badge.color,fontFamily:'monospace',fontSize:'9px',fontWeight:'900',letterSpacing:'2px',padding:'5px 10px',border:`1px solid ${badge.color}44`}}>{badge.label}</div>
+          </div>
+          {cur.sections.map((sec,si)=>(
+            <div key={si} style={{marginBottom:'28px'}}>
+              <div style={{display:'flex',alignItems:'center',gap:'12px',marginBottom:'10px'}}>
+                <div style={M({fontSize:'9px',letterSpacing:'3px',color:cur.accentColor,fontWeight:'900'})}>{sec.label}</div>
+                <div style={{flex:1,height:'1px',background:'#1e1e1e'}}/>
+              </div>
+              <div style={{display:'flex',flexDirection:'column',gap:'2px'}}>
+                {sec.items.map((item,ii)=>{
+                  const key=`${activeDay}-${si}-${ii}`,dn=!!checked[key];
+                  return(
+                    <div key={ii} style={{background:dn?'#0d1a12':item.priority?'#141414':'#0f0f0f',borderLeft:`3px solid ${dn?cur.accentColor:item.priority?cur.accentColor:'#222'}`,padding:'14px 16px',display:'flex',alignItems:'center',gap:'12px',opacity:dn?.5:1,transition:'all .2s'}}>
+                      <div onClick={()=>toggle(key)} style={{width:'16px',height:'16px',borderRadius:'3px',flexShrink:0,border:`2px solid ${dn?cur.accentColor:'#333'}`,background:dn?cur.accentColor:'transparent',display:'flex',alignItems:'center',justifyContent:'center',cursor:'pointer'}}>
+                        {dn&&<span style={{color:'#000',fontSize:'10px',fontWeight:'bold'}}>✓</span>}
+                      </div>
+                      <div style={{flex:1,cursor:'pointer'}} onClick={()=>toggle(key)}>
+                        <div style={{fontSize:'14px',fontWeight:item.priority?'bold':'normal',color:dn?'#555':item.priority?'#fff':'#aaa',textDecoration:dn?'line-through':'none'}}>
+                          {item.name}{item.priority&&!dn&&<span style={{color:cur.accentColor,marginLeft:'6px',fontSize:'10px',fontFamily:'monospace'}}>★</span>}
+                        </div>
+                        <div style={M({fontSize:'11px',color:'#555',marginTop:'3px'})}>{item.note}</div>
+                      </div>
+                      <div style={{display:'flex',flexDirection:'column',alignItems:'flex-end',gap:'6px',minWidth:'80px'}}>
+                        <div style={M({fontSize:'12px',fontWeight:'bold',color:dn?'#333':item.priority?cur.accentColor:'#444',whiteSpace:'nowrap'})}>{item.sets}</div>
+                        <button onClick={()=>setModal(item)} style={{background:'transparent',border:`1px solid ${cur.accentColor}44`,color:cur.accentColor,fontFamily:'monospace',fontSize:'8px',letterSpacing:'1px',padding:'3px 7px',cursor:'pointer',whiteSpace:'nowrap'}}>▶ DEMO</button>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          ))}
+        </div>
+      </>}
+
+      {tab==='milestones'&&(
+        <div style={{padding:'24px 20px'}}>
+          <div style={M({fontSize:'10px',letterSpacing:'4px',color:'#444',marginBottom:'20px'})}>12-WEEK ROADMAP TO 30″+</div>
+          {milestones.map((m,i)=>(
+            <div key={i} style={{display:'flex',gap:'20px',alignItems:'stretch',marginBottom:'4px'}}>
+              <div style={{display:'flex',flexDirection:'column',alignItems:'center',minWidth:'20px'}}>
+                <div style={{width:'10px',height:'10px',borderRadius:'50%',background:mlColors[i],marginTop:'18px'}}/>
+                {i<3&&<div style={{width:'1px',flex:1,background:'#222',marginTop:'4px'}}/>}
+              </div>
+              <div style={{flex:1,background:'#111',border:'1px solid #1e1e1e',padding:'16px 18px',marginBottom:'4px'}}>
+                <div style={{display:'flex',justifyContent:'space-between',alignItems:'center'}}>
+                  <div style={M({fontSize:'10px',color:'#555',letterSpacing:'2px'})}>WEEKS {m.weeks}</div>
+                  <div style={{fontSize:'22px',fontWeight:'bold',color:mlColors[i],fontStyle:'italic'}}>{m.target}</div>
+                </div>
+                <div style={{fontSize:'13px',color:'#777',marginTop:'6px'}}>{m.focus}</div>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {tab==='rules'&&(
+        <div style={{padding:'24px 20px'}}>
+          <div style={M({fontSize:'10px',letterSpacing:'4px',color:'#444',marginBottom:'20px'})}>NON-NEGOTIABLE RULES</div>
+          {rules.map((r,i)=>(
+            <div key={i} style={{background:'#111',border:'1px solid #1e1e1e',borderLeft:`3px solid ${r.color}`,padding:'18px',marginBottom:'4px'}}>
+              <div style={{fontSize:'20px',marginBottom:'8px'}}>{r.icon}</div>
+              <div style={{fontSize:'15px',fontWeight:'bold',marginBottom:'6px'}}>{r.rule}</div>
+              <div style={M({fontSize:'12px',color:'#666'})}>{r.why}</div>
+            </div>
+          ))}
+          <div style={{marginTop:'20px',background:'#00FF8710',border:'1px solid #00FF8730',padding:'18px'}}>
+            <div style={M({fontSize:'9px',color:'#00FF87',letterSpacing:'3px',marginBottom:'10px'})}>THE HONEST TRUTH</div>
+            <div style={{fontSize:'13px',color:'#aaa',lineHeight:1.7}}>Going from 20″ to 30″+ is achievable — but volleyball demands more than just a big vert. The athletes who dominate combine <em>explosiveness</em> with lateral quickness, shoulder durability, and core transfer. Train the whole system.</div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+
+
+// ── Math helpers ──────────────────────────────────────────────────
+
+// ── Color palette ─────────────────────────────────────────────────
+const C = {
+  bg: '#07080a',
+  surface: '#0d0f12',
+  border: '#1a1d22',
+  accent: '#FF4D00',
+  accentGlow: '#FF4D0033',
+  gold: '#FFB800',
+  blue: '#00C8FF',
+  green: '#00FF87',
+  text: '#e8e4de',
+  muted: '#4a4a55',
+  dim: '#1e2028',
+};
+
+// ── Canvas drawing helpers ─────────────────────────────────────────
+const SP_SKIN='#c8956c', SP_SKIN_D='#a06b40', SP_SKIN_S='#e8b48a';
+const SP_SHIRT='#1a1a2e', SP_SHIRT_D='#0d0d1a', SP_SHIRT_H='#2a2a4e';
+const SP_SHORTS='#0f1218', SP_SHOE='#e8e0d0', SP_SHOE_D='#c8b89a', SP_HAIR='#1a0a00';
+
+function drawAthlete(ctx, p) {
+  const c = ctx;
+  c.save(); c.lineCap='round'; c.lineJoin='round';
+
+  const seg=(x1,y1,x2,y2,w,col,scol)=>{
+    const a=Math.atan2(y2-y1,x2-x1), p2=a+Math.PI/2, w1=w, w2=w*.65;
+    c.beginPath();
+    c.moveTo(x1+Math.cos(p2)*w1,y1+Math.sin(p2)*w1);
+    c.quadraticCurveTo((x1+x2)/2+Math.cos(p2)*((w1+w2)/2)*1.1,(y1+y2)/2+Math.sin(p2)*((w1+w2)/2)*1.1,x2+Math.cos(p2)*w2,y2+Math.sin(p2)*w2);
+    c.lineTo(x2-Math.cos(p2)*w2,y2-Math.sin(p2)*w2);
+    c.quadraticCurveTo((x1+x2)/2-Math.cos(p2)*((w1+w2)/2)*1.1,(y1+y2)/2-Math.sin(p2)*((w1+w2)/2)*1.1,x1-Math.cos(p2)*w1,y1-Math.sin(p2)*w1);
+    c.closePath(); c.fillStyle=col; c.fill();
+    if(scol){c.strokeStyle=scol;c.lineWidth=.6;c.stroke();}
+  };
+  const oval=(cx,cy,rx,ry,a,col,scol,sw=.6)=>{
+    c.beginPath();c.ellipse(cx,cy,rx,ry,a,0,Math.PI*2);
+    c.fillStyle=col;c.fill();
+    if(scol){c.strokeStyle=scol;c.lineWidth=sw;c.stroke();}
+  };
+
+  const {sho,hips,neck,head,eL,eR,hL,hR,kL,kR,fL,fR}=p;
+  const td=Math.atan2(hips.y-sho.y,hips.x-sho.x), tp=td+Math.PI/2;
+  const tW=11, hW=9;
+
+  // torso
+  c.beginPath();
+  c.moveTo(sho.x+Math.cos(tp)*tW,sho.y+Math.sin(tp)*tW);
+  c.bezierCurveTo(sho.x+Math.cos(tp)*tW+Math.cos(td)*7,sho.y+Math.sin(tp)*tW+Math.sin(td)*7,hips.x+Math.cos(tp)*hW+Math.cos(td)*(-3),hips.y+Math.sin(tp)*hW+Math.sin(td)*(-3),hips.x+Math.cos(tp)*hW,hips.y+Math.sin(tp)*hW);
+  c.lineTo(hips.x-Math.cos(tp)*hW,hips.y-Math.sin(tp)*hW);
+  c.bezierCurveTo(hips.x-Math.cos(tp)*hW+Math.cos(td)*(-3),hips.y-Math.sin(tp)*hW+Math.sin(td)*(-3),sho.x-Math.cos(tp)*tW+Math.cos(td)*7,sho.y-Math.sin(tp)*tW+Math.sin(td)*7,sho.x-Math.cos(tp)*tW,sho.y-Math.sin(tp)*tW);
+  c.closePath(); c.fillStyle=SP_SHIRT; c.fill(); c.strokeStyle=SP_SHIRT_D; c.lineWidth=.7; c.stroke();
+
+  // neck, legs, arms
+  oval(lerp(neck.x,head.x,.3),lerp(neck.y,head.y,.3),4,6,Math.atan2(head.y-neck.y,head.x-neck.x),SP_SKIN,SP_SKIN_D);
+  seg(hips.x-4,hips.y,kL.x,kL.y,7,SP_SHORTS,SP_SKIN_D);
+  seg(hips.x+4,hips.y,kR.x,kR.y,7,SP_SHORTS,SP_SKIN_D);
+  seg(kL.x,kL.y,fL.x,fL.y-3,5,SP_SKIN,SP_SKIN_D);
+  seg(kR.x,kR.y,fR.x,fR.y-3,5,SP_SKIN,SP_SKIN_D);
+  oval(kL.x,kL.y,4.5,4,Math.atan2(kL.y-hips.y,kL.x-hips.x),SP_SKIN_S,SP_SKIN_D,.5);
+  oval(kR.x,kR.y,4.5,4,Math.atan2(kR.y-hips.y,kR.x-hips.x),SP_SKIN_S,SP_SKIN_D,.5);
+
+  // shoes
+  const shoe=(kx,ky,fx,fy)=>{
+    const a=Math.atan2(fy-ky,fx-kx);
+    c.beginPath();c.ellipse(fx+Math.cos(a)*4,fy+2,8,3,a*.3,0,Math.PI*2);c.fillStyle=SP_SHOE_D;c.fill();
+    c.beginPath();
+    c.moveTo(fx-Math.cos(a+Math.PI/2)*3.5,fy-Math.sin(a+Math.PI/2)*3.5);
+    c.lineTo(fx+Math.cos(a)*9,fy+Math.sin(a)*4.5-1);
+    c.lineTo(fx+Math.cos(a)*9+Math.cos(a+Math.PI/2)*2.5,fy+Math.sin(a)*4.5+Math.sin(a+Math.PI/2)*2.5-1);
+    c.lineTo(fx+Math.cos(a+Math.PI/2)*2.5,fy+Math.sin(a+Math.PI/2)*2.5);
+    c.closePath();c.fillStyle=SP_SHOE;c.fill();c.strokeStyle=SP_SHOE_D;c.lineWidth=.6;c.stroke();
+  };
+  shoe(kL.x,kL.y,fL.x,fL.y); shoe(kR.x,kR.y,fR.x,fR.y);
+
+  seg(sho.x-9,sho.y,eL.x,eL.y,5,SP_SHIRT,SP_SHIRT_D);
+  seg(sho.x+9,sho.y,eR.x,eR.y,5,SP_SHIRT,SP_SHIRT_D);
+  oval(sho.x-9,sho.y,6.5,5.5,Math.atan2(eL.y-sho.y,eL.x-sho.x),SP_SHIRT_H,SP_SHIRT_D,.6);
+  oval(sho.x+9,sho.y,6.5,5.5,Math.atan2(eR.y-sho.y,eR.x-sho.x),SP_SHIRT_H,SP_SHIRT_D,.6);
+  seg(eL.x,eL.y,hL.x,hL.y,3.5,SP_SKIN,SP_SKIN_D);
+  seg(eR.x,eR.y,hR.x,hR.y,3.5,SP_SKIN,SP_SKIN_D);
+  oval(eL.x,eL.y,3.5,3,Math.atan2(eL.y-sho.y,eL.x-sho.x),SP_SKIN_S,SP_SKIN_D,.5);
+  oval(eR.x,eR.y,3.5,3,Math.atan2(eR.y-sho.y,eR.x-sho.x),SP_SKIN_S,SP_SKIN_D,.5);
+  oval(hL.x,hL.y,3.5,2.5,Math.atan2(hL.y-eL.y,hL.x-eL.x),SP_SKIN,SP_SKIN_D,.5);
+  oval(hR.x,hR.y,3.5,2.5,Math.atan2(hR.y-eR.y,hR.x-eR.x),SP_SKIN,SP_SKIN_D,.5);
+
+  // head
+  oval(head.x,head.y,9.5,10.5,0,SP_SKIN,SP_SKIN_D,.7);
+  c.beginPath();c.ellipse(head.x,head.y-4.5,9.5,7.5,0,Math.PI,Math.PI*2);c.fillStyle=SP_HAIR;c.fill();
+  c.globalAlpha=.55;c.beginPath();c.ellipse(head.x+2,head.y-3.5,7.5,4.5,-.2,Math.PI,Math.PI*2);c.fillStyle=SP_HAIR;c.fill();c.globalAlpha=1;
+  oval(head.x+8.5,head.y+1,2.3,2.8,0,SP_SKIN,SP_SKIN_D,.4);
+  oval(head.x+3.5,head.y+1,2.3,1.8,0,'#fff','#999',.3);
+  c.beginPath();c.arc(head.x+4,head.y+1,1.2,0,Math.PI*2);c.fillStyle='#2a1a0a';c.fill();
+  c.beginPath();c.moveTo(head.x+1.5,head.y-2);c.lineTo(head.x+6.5,head.y-2.5);c.strokeStyle=SP_HAIR;c.lineWidth=.9;c.stroke();
+  c.beginPath();c.moveTo(head.x+5.5,head.y+1);c.quadraticCurveTo(head.x+7.5,head.y+3,head.x+5.5,head.y+3.5);c.strokeStyle=SP_SKIN_D;c.lineWidth=.7;c.stroke();
+  c.beginPath();c.arc(head.x+4.5,head.y+5.5,1.8,-.1,Math.PI+.1);c.strokeStyle=SP_SKIN_D;c.lineWidth=.6;c.stroke();
+
+  c.globalAlpha=.07;c.fillStyle='#ccc';
+  c.beginPath();c.ellipse((fL.x+fR.x)/2,Math.max(fL.y,fR.y)+4,15,3.5,0,0,Math.PI*2);c.fill();
+  c.globalAlpha=1;
+  c.restore();
+}
+
+const lerpP=(a,b,t)=>{const o={};for(const k in a)o[k]={x:lerp(a[k].x,b[k].x,t),y:lerp(a[k].y,b[k].y,t)};return o;};
+
+function drawBall(ctx,x,y,r,glow,col='#ddd'){
+  if(glow>0){
+    const g=ctx.createRadialGradient(x,y,0,x,y,r*3);
+    g.addColorStop(0,`rgba(255,180,0,${glow*.5})`);
+    g.addColorStop(1,'transparent');
+    ctx.fillStyle=g;ctx.beginPath();ctx.arc(x,y,r*3,0,Math.PI*2);ctx.fill();
+  }
+  ctx.fillStyle=col;ctx.beginPath();ctx.arc(x,y,r,0,Math.PI*2);ctx.fill();
+  ctx.strokeStyle='#aaa';ctx.lineWidth=.7;ctx.stroke();
+  ctx.strokeStyle='#888';ctx.lineWidth=.55;
+  ctx.beginPath();ctx.moveTo(x-r,y);ctx.quadraticCurveTo(x,y-r*.45,x+r,y);ctx.stroke();
+  ctx.beginPath();ctx.moveTo(x-r*.45,y-r*.8);ctx.quadraticCurveTo(x+r*.55,y,x-r*.45,y+r*.8);ctx.stroke();
+}
+
+// ─── Spike phase canvases ──────────────────────────────────────────
+const PHASES = [
+  {
+    id:'load',
+    label:'WIND-UP',
+    color:'#FFB800',
+    tagline:'Load the spring',
+    mechanic:'Elbow high, hand behind ear — like pulling a bow. Every inch of backswing = more speed forward.',
+    powerTip:'Your hitting shoulder should drop back so your chest opens toward the setter. The bigger the rotation, the more power transfers.',
+    mistakes:['Elbow drops below shoulder — kills rotation','Rushing the wind-up — no time to load','Arm stays in front of body — zero elastic energy'],
+    draw:(ctx,t,col)=>{
+      const W=160,H=200,gY=178,cx=80;
+      ctx.clearRect(0,0,W,H);ctx.fillStyle='#08090b';ctx.fillRect(0,0,W,H);
+      // power arc guide
+      ctx.globalAlpha=.08+Math.sin(t*Math.PI*2)*.04;
+      ctx.strokeStyle=col;ctx.lineWidth=12;ctx.lineCap='round';
+      ctx.beginPath();ctx.arc(cx+6,gY-82,42,-2.4,-0.5);ctx.stroke();
+      ctx.globalAlpha=1;
+      const v=smoothstep(sat(Math.sin(t*Math.PI*2)*.5+.5));
+      const load=lerp(0.2,1,v);
+      const by=gY-62, sy=by-28, hy=by+18;
+      const p={
+        head:{x:cx-load*6,y:sy-24},neck:{x:cx-load*4,y:sy-8},
+        sho:{x:cx,y:sy},hips:{x:cx,y:by},
+        kL:{x:cx-9,y:gY-30},kR:{x:cx+9,y:gY-30},
+        fL:{x:cx-11,y:gY},fR:{x:cx+11,y:gY},
+        eL:{x:cx-22,y:sy+14},
+        eR:{x:cx+14+load*8,y:sy-8-load*16},
+        hL:{x:cx-18,y:sy+28},
+        hR:{x:cx+10+load*12,y:sy-22-load*22},
+      };
+      // elbow angle indicator
+      if(load>.5){
+        ctx.globalAlpha=.35;ctx.strokeStyle=col;ctx.lineWidth=.8;ctx.setLineDash([2,3]);
+        ctx.beginPath();ctx.moveTo(p.eR.x,p.eR.y);ctx.lineTo(p.eR.x+22,p.eR.y);ctx.stroke();
+        ctx.beginPath();ctx.moveTo(p.eR.x,p.eR.y);ctx.lineTo(p.hR.x,p.hR.y);ctx.stroke();
+        ctx.setLineDash([]);ctx.globalAlpha=1;
+        ctx.fillStyle=col;ctx.font='bold 8px monospace';
+        ctx.globalAlpha=load*.7;ctx.fillText('90°+',p.eR.x+14,p.eR.y-4);ctx.globalAlpha=1;
+      }
+      drawAthlete(ctx,p);
+      // label: "ELBOW UP"
+      ctx.globalAlpha=.55+Math.sin(t*Math.PI*2+1)*.2;
+      ctx.fillStyle=col;ctx.font='bold 7px monospace';ctx.letterSpacing='1px';
+      ctx.fillText('ELBOW HIGH',p.eR.x-10,p.eR.y-14);
+      ctx.globalAlpha=1;
+    }
+  },
+  {
+    id:'shoulder',
+    label:'SHOULDER ROTATION',
+    color:'#FF4D00',
+    tagline:'Rotate, don\'t arm-swing',
+    mechanic:'The hitting arm is just the whip. Power starts at the hips, flows through the core, and explodes through the shoulder.',
+    powerTip:'Think of throwing a baseball — hips rotate first, shoulders follow a split-second later. This sequential rotation is where elite hitters generate force.',
+    mistakes:['Hips stay square to the net — upper-body only swing','Shoulders and hips rotate at the same time — no whip','Locked core — energy leaks before reaching the arm'],
+    draw:(ctx,t,col)=>{
+      const W=160,H=200,gY=178,cx=80;
+      ctx.clearRect(0,0,W,H);ctx.fillStyle='#08090b';ctx.fillRect(0,0,W,H);
+      const v=sat(Math.sin(t*Math.PI*2)*.5+.5);
+      const rot=smoothstep(v);
+      const by=gY-64,sy=by-26;
+      // rotation arc
+      ctx.globalAlpha=.12;ctx.strokeStyle=col;ctx.lineWidth=20;
+      ctx.beginPath();ctx.arc(cx,by+4,18,-1.8+rot*.8,-1.8+rot*.8+.6);ctx.stroke();
+      ctx.globalAlpha=.25;ctx.lineWidth=2;ctx.setLineDash([3,3]);
+      ctx.beginPath();ctx.arc(cx,by+4,18,-2.4,.2);ctx.stroke();
+      ctx.setLineDash([]);ctx.globalAlpha=1;
+      const hipRot = rot*12, shoRot = rot*22;
+      const p={
+        head:{x:cx+shoRot*.4,y:sy-22},neck:{x:cx+shoRot*.25,y:sy-6},
+        sho:{x:cx,y:sy},hips:{x:cx,y:by},
+        kL:{x:cx-9,y:gY-28},kR:{x:cx+9,y:gY-28},
+        fL:{x:cx-12,y:gY},fR:{x:cx+12,y:gY},
+        eL:{x:cx-20-shoRot*.5,y:sy+18+shoRot*.3},
+        eR:{x:cx+22+shoRot*.8,y:sy+4-shoRot*.5},
+        hL:{x:cx-16-shoRot*.4,y:sy+32+shoRot*.2},
+        hR:{x:cx+26+shoRot,y:sy-8-shoRot*.3},
+      };
+      // hip → shoulder arrow
+      ctx.globalAlpha=.4;ctx.strokeStyle=col;ctx.lineWidth=1.5;
+      ctx.beginPath();ctx.moveTo(cx-hipRot,by+2);ctx.lineTo(cx+hipRot,by+2);ctx.stroke();
+      ctx.globalAlpha=.3;ctx.strokeStyle='#00FF87';
+      ctx.beginPath();ctx.moveTo(cx-shoRot,sy+2);ctx.lineTo(cx+shoRot,sy+2);ctx.stroke();
+      ctx.globalAlpha=1;
+      drawAthlete(ctx,p);
+    }
+  },
+  {
+    id:'contact',
+    label:'CONTACT POINT',
+    color:'#FF4D00',
+    tagline:'Highest point, straight arm',
+    mechanic:'Contact the ball at full arm extension, slightly in front of your hitting shoulder. Too close = no leverage. Too far = no control.',
+    powerTip:'Your palm should hit the top-back of the ball. A flat, stiff palm transfers more force than a cupped hand. Make the sound LOUD.',
+    mistakes:['Contacting the ball behind your head — power goes backward','Bent elbow at contact — arm acts as a shock absorber','Ball too far in front — you\'re pushing, not hitting'],
+    draw:(ctx,t,col)=>{
+      const W=160,H=200,gY=178,cx=72;
+      ctx.clearRect(0,0,W,H);ctx.fillStyle='#08090b';ctx.fillRect(0,0,W,H);
+      const v=sat(Math.sin(t*Math.PI*2)*.5+.5);
+      const hit=smoothstep(v);
+      const airY=gY-hit*88, by=airY-30, sy=by-26;
+      // shadow
+      ctx.globalAlpha=lerp(.15,.03,hit);ctx.fillStyle='#aaa';
+      ctx.beginPath();ctx.ellipse(cx,gY+2,lerp(14,5,hit),3,0,0,Math.PI*2);ctx.fill();ctx.globalAlpha=1;
+      const bx=cx+28+hit*14, ballY=sy-20-hit*28;
+      // impact flash
+      if(hit>.75){
+        const flash=(hit-.75)/.25;
+        ctx.globalAlpha=flash*.55;
+        const g=ctx.createRadialGradient(bx,ballY,0,bx,ballY,28);
+        g.addColorStop(0,col+'ff');g.addColorStop(.5,col+'44');g.addColorStop(1,'transparent');
+        ctx.fillStyle=g;ctx.beginPath();ctx.arc(bx,ballY,28,0,Math.PI*2);ctx.fill();
+        ctx.globalAlpha=1;
+        // impact lines
+        ctx.globalAlpha=flash*.6;ctx.strokeStyle=col;ctx.lineWidth=1.2;
+        for(let i=0;i<6;i++){const a=i*Math.PI/3+hit*2;ctx.beginPath();ctx.moveTo(bx+Math.cos(a)*10,ballY+Math.sin(a)*10);ctx.lineTo(bx+Math.cos(a)*18,ballY+Math.sin(a)*18);ctx.stroke();}
+        ctx.globalAlpha=1;
+      }
+      const p={
+        head:{x:cx+8,y:sy-20},neck:{x:cx+6,y:sy-6},
+        sho:{x:cx,y:sy},hips:{x:cx,y:by},
+        kL:{x:cx-11,y:by+22},kR:{x:cx+11,y:by+20},
+        fL:{x:cx-10,y:airY+lerp(20,0,hit)},fR:{x:cx+10,y:airY+lerp(22,2,hit)},
+        eL:{x:cx-18,y:sy+16},
+        eR:{x:bx-18,y:sy-10},
+        hL:{x:cx-14,y:sy+30},
+        hR:{x:bx,y:ballY},
+      };
+      drawBall(ctx,bx,ballY,9,hit>.75?(hit-.75)/.25*1.2:0);
+      drawAthlete(ctx,p);
+      // "CONTACT ZONE" label
+      ctx.globalAlpha=.4;ctx.strokeStyle=col;ctx.lineWidth=.7;ctx.setLineDash([2,3]);
+      ctx.beginPath();ctx.moveTo(cx+22,sy-30);ctx.lineTo(bx+12,sy-30);ctx.stroke();
+      ctx.setLineDash([]);ctx.globalAlpha=1;
+      ctx.fillStyle=col;ctx.font='7px monospace';ctx.globalAlpha=.55;
+      ctx.fillText('CONTACT ZONE',cx+20,sy-34);ctx.globalAlpha=1;
+    }
+  },
+  {
+    id:'snap',
+    label:'WRIST SNAP',
+    color:'#00C8FF',
+    tagline:'The topspin finisher',
+    mechanic:'After palm contact, snap your wrist forward and down to put topspin on the ball. This makes it drop into the court instead of sailing out.',
+    powerTip:'Think of snapping a towel — the wrist crack comes AFTER the arm swings through. The snap adds 5–15 mph of ball speed and curve.',
+    mistakes:['No wrist action — flat ball floats out of bounds','Snapping too early — turns into a push shot','Stiff fingers — reduces snap velocity significantly'],
+    draw:(ctx,t,col)=>{
+      const W=160,H=200,gY=178,cx=72;
+      ctx.clearRect(0,0,W,H);ctx.fillStyle='#08090b';ctx.fillRect(0,0,W,H);
+      const v=sat(Math.sin(t*Math.PI*2)*.5+.5);
+      const snap=smoothstep(v);
+      const airY=gY-76, by=airY-30, sy=by-24;
+      ctx.globalAlpha=.07;ctx.fillStyle='#aaa';
+      ctx.beginPath();ctx.ellipse(cx,gY+2,8,2.5,0,0,Math.PI*2);ctx.fill();ctx.globalAlpha=1;
+      // ball trajectory arc (topspin)
+      const bStartX=cx+40,bStartY=sy-30;
+      const progress=snap;
+      const bx=bStartX+progress*50, by2=bStartY+progress*progress*80;
+      // draw trajectory guide
+      ctx.globalAlpha=.2;ctx.strokeStyle=col;ctx.lineWidth=1;ctx.setLineDash([2,4]);
+      ctx.beginPath();
+      for(let i=0;i<=20;i++){const ti=i/20;ctx.lineTo(bStartX+ti*50,bStartY+ti*ti*80);}
+      ctx.stroke();ctx.setLineDash([]);ctx.globalAlpha=1;
+      // spin indicator on ball
+      if(snap>.15){
+        ctx.globalAlpha=.4;ctx.strokeStyle=col;ctx.lineWidth=1.2;
+        for(let i=0;i<3;i++){
+          const a=-Math.PI*.4+i*.3+snap*8;
+          ctx.beginPath();ctx.arc(bx-2,by2-2,5,a,a+.8);ctx.stroke();
+        }
+        ctx.globalAlpha=1;
+      }
+      drawBall(ctx,bx,by2,8,0);
+      const wristSnap=snap*1.4;
+      const p={
+        head:{x:cx+8,y:sy-20},neck:{x:cx+5,y:sy-6},
+        sho:{x:cx,y:sy},hips:{x:cx,y:by},
+        kL:{x:cx-10,y:by+22},kR:{x:cx+10,y:by+20},
+        fL:{x:cx-10,y:airY+18},fR:{x:cx+10,y:airY+16},
+        eL:{x:cx-17,y:sy+16},
+        eR:{x:cx+32,y:sy-14+snap*6},
+        hL:{x:cx-13,y:sy+30},
+        hR:{x:bStartX+snap*12,y:bStartY+snap*12+snap*14},
+      };
+      drawAthlete(ctx,p);
+      // wrist angle label
+      ctx.globalAlpha=.5;ctx.fillStyle=col;ctx.font='7px monospace';
+      ctx.fillText('SNAP ↓',p.hR.x+4,p.hR.y+12);ctx.globalAlpha=1;
+    }
+  },
+  {
+    id:'followthrough',
+    label:'FOLLOW-THROUGH',
+    color:'#00FF87',
+    tagline:'Let the arm finish across',
+    mechanic:'After contact, your hitting arm swings all the way across your body. Stopping early kills velocity — the follow-through IS the swing.',
+    powerTip:'Your hand should end up near the opposite hip after the swing. If your arm stops at the ball, you hit the brake at impact.',
+    mistakes:['Arm stops at contact — braking at the worst moment','Pulling off the shot — elbow flares out early','No body rotation on follow-through — power didn\'t transfer'],
+    draw:(ctx,t,col)=>{
+      const W=160,H=200,gY=178,cx=72;
+      ctx.clearRect(0,0,W,H);ctx.fillStyle='#08090b';ctx.fillRect(0,0,W,H);
+      const v=sat(Math.sin(t*Math.PI*2)*.5+.5);
+      const fol=smoothstep(v);
+      const airY=gY-70, by=airY-30, sy=by-24;
+      ctx.globalAlpha=.06;ctx.fillStyle='#aaa';
+      ctx.beginPath();ctx.ellipse(cx,gY+2,8,2.5,0,0,Math.PI*2);ctx.fill();ctx.globalAlpha=1;
+      // motion trail of the arm
+      ctx.globalAlpha=.15;ctx.strokeStyle=col;ctx.lineWidth=8;ctx.lineCap='round';
+      ctx.beginPath();ctx.arc(cx+18,sy+2,36,-1.8,-1.8+fol*2.2);ctx.stroke();
+      ctx.globalAlpha=1;
+      const swing=fol;
+      const hRx=cx+36-swing*48, hRy=sy-22+swing*52;
+      const p={
+        head:{x:cx+10-swing*8,y:sy-20},neck:{x:cx+6-swing*4,y:sy-6},
+        sho:{x:cx,y:sy},hips:{x:cx,y:by},
+        kL:{x:cx-10,y:by+22},kR:{x:cx+10,y:by+22},
+        fL:{x:cx-10,y:airY+16},fR:{x:cx+10,y:airY+14},
+        eL:{x:cx-16,y:sy+18},
+        eR:{x:cx+24-swing*18,y:sy-10+swing*28},
+        hL:{x:cx-12,y:sy+32},
+        hR:{x:hRx,y:hRy},
+      };
+      drawAthlete(ctx,p);
+      // "FULL FINISH" annotation
+      if(swing>.6){
+        ctx.globalAlpha=(swing-.6)/.4*.5;
+        ctx.fillStyle=col;ctx.font='bold 7px monospace';
+        ctx.fillText('FULL FINISH',hRx-14,hRy+14);ctx.globalAlpha=1;
+      }
+    }
+  },
+];
+
+// ─── Training exercises with power focus ──────────────────────────
+const TRAINING = [
+  {
+    id:'med-throw',
+    title:'Med Ball Overhead Throw',
+    category:'POWER TRANSFER',
+    color:'#FF4D00',
+    sets:'4×6',
+    icon:'🏀',
+    description:'Builds the full kinetic chain from legs through arm. The closest gym movement to an actual spike.',
+    howTo:[
+      {step:'Setup', desc:'Stand 3–4 feet from a wall or with a partner. Hold a 4–6 lb medicine ball overhead.'},
+      {step:'Load', desc:'Shift weight back, hips drop slightly, ball goes behind your head — same as spike wind-up.'},
+      {step:'Explode', desc:'Drive through your legs, rotate your hips, then shoulders. Throw the ball as hard as possible at the wall.'},
+      {step:'Arm Path', desc:'Your throwing arm follows the exact same arc as a spike — this is deliberate skill training, not just strength.'},
+      {step:'Reset', desc:'Catch or retrieve the ball, reset fully, then throw again. Max effort every rep — no cruise control.'},
+    ],
+    powerKey:'The wall throw trains your nervous system to fire your kinetic chain in the right sequence. Each rep literally programs your spike power.',
+  },
+  {
+    id:'band-pull',
+    title:'Resistance Band Spike Swing',
+    category:'ARM SPEED',
+    color:'#FFB800',
+    sets:'3×12',
+    icon:'⚡',
+    description:'Isolates the shoulder rotation and arm swing pattern under resistance to build specific spike speed.',
+    howTo:[
+      {step:'Setup', desc:'Anchor a band at shoulder height behind you. Stand in your spike posture, band in your hitting hand.'},
+      {step:'Wind-Up', desc:'Pull into your full wind-up position — elbow high, hand behind ear, shoulder rotated back.'},
+      {step:'Fire', desc:'Perform your full spike swing motion against the band resistance. Don\'t rush it — control the path.'},
+      {step:'Snap', desc:'Include your wrist snap at the end of every rep. The band shouldn\'t prevent it — just make it harder.'},
+      {step:'Return', desc:'Return slowly to the loaded position — the slow return also builds strength in the stabilizing muscles.'},
+    ],
+    powerKey:'Band resistance forces your arm to fight for every inch of the swing path, building specific motor patterns that directly increase hitting speed.',
+  },
+  {
+    id:'plyo-pushup',
+    title:'Plyo Push-Up (Clap)',
+    category:'UPPER EXPLOSIVE POWER',
+    color:'#FF4D00',
+    sets:'4×5',
+    icon:'💥',
+    description:'Trains explosive upper-body force production — the same fast-twitch muscle fiber recruitment needed at ball contact.',
+    howTo:[
+      {step:'Setup', desc:'Standard push-up position. Hands slightly wider than shoulder-width.'},
+      {step:'Lower', desc:'Lower your chest to just above the floor in a controlled manner.'},
+      {step:'Explode', desc:'Push as hard and fast as possible — hands should leave the ground completely.'},
+      {step:'Clap', desc:'Clap your hands while airborne, then catch yourself with soft elbows on landing.'},
+      {step:'Reset', desc:'Full reset between reps — this is a max-effort exercise. Do NOT rush. 5 perfect reps > 15 sloppy reps.'},
+    ],
+    powerKey:'The ground-leaving push trains your pecs and triceps to generate force at max velocity — the same quality needed to make the ball explode off your palm.',
+  },
+  {
+    id:'wrist-snap',
+    title:'Towel Wrist Snap Drill',
+    category:'WRIST SPEED',
+    color:'#00C8FF',
+    sets:'3×20',
+    icon:'🌊',
+    description:'Isolates the wrist snap to build speed and timing of the most neglected part of the spike.',
+    howTo:[
+      {step:'Setup', desc:'Hold a small towel, one end in your hitting hand. Extend your arm forward as if at contact point.'},
+      {step:'Arm Set', desc:'Lock your elbow — only your wrist and hand move during this drill.'},
+      {step:'Snap', desc:'Snap your wrist forward and down sharply so the towel cracks like a whip. The SOUND is your feedback.'},
+      {step:'Timing', desc:'The snap should happen at the very END of the arm swing, not during it. Practice the feel of the delay.'},
+      {step:'Add Ball', desc:'Progress to snapping against a ball held at contact height by a partner — aim for a loud smack, not a soft push.'},
+    ],
+    powerKey:'Elite hitters add 5–15 mph purely through wrist speed. Most players never train this directly. A cracking towel proves you have it.',
+  },
+  {
+    id:'standing-spike',
+    title:'Standing Wall Spike',
+    category:'TECHNIQUE VOLUME',
+    color:'#00FF87',
+    sets:'5×10',
+    icon:'🏐',
+    description:'High-repetition spike swings against a wall to groove perfect mechanics without the fatigue of approach jumps.',
+    howTo:[
+      {step:'Distance', desc:'Stand about 2 feet from a wall or rebounder. Hold or toss a ball to contact height.'},
+      {step:'Wind-Up', desc:'Perform your full wind-up — elbow high, shoulder back, chest open. No shortcuts.'},
+      {step:'Swing', desc:'Execute your full arm path: shoulder rotation → arm extension → wrist snap.'},
+      {step:'Sound Check', desc:'You should hear a sharp CRACK, not a thud. Thud = flat palm with no snap. Crack = good contact.'},
+      {step:'Reset', desc:'Retrieve ball, reset posture, repeat. Focus on the SAME motion every single rep — you\'re building a habit.'},
+    ],
+    powerKey:'You can\'t approach-jump 50 times in a session without burning out. Wall reps let you get 10x the quality mechanics repetitions with minimal fatigue.',
+  },
+  {
+    id:'rotational-cable',
+    title:'Rotational Cable Pull',
+    category:'HIP-TO-SHOULDER CHAIN',
+    color:'#FF4D00',
+    sets:'3×10/side',
+    icon:'🔄',
+    description:'Directly trains the rotational kinetic chain — the most under-developed power source in volleyball players.',
+    howTo:[
+      {step:'Setup', desc:'Set cable or band at hip height. Stand sideways to anchor, feet shoulder-width, slight squat.'},
+      {step:'Load', desc:'Rotate toward the anchor, letting your hips and shoulders wind up — this is your "coil."'},
+      {step:'Drive', desc:'Initiate with your hips rotating away from the anchor first. Hips LEAD, shoulders FOLLOW.'},
+      {step:'Finish', desc:'Complete the rotation — your chest should end up facing away from the anchor.'},
+      {step:'Resist Return', desc:'Control the return slowly — this eccentric phase builds the power for the next rep.'},
+    ],
+    powerKey:'Research shows elite volleyball hitters generate 60–70% of their spike power from hip and trunk rotation. This exercise directly trains that source.',
+  },
+];
+
+// ─── Animated phase canvas component ──────────────────────────────
+function PhaseCanvas({ phase }) {
+  const ref = useRef(null), fr = useRef(0), raf = useRef(null);
+  useEffect(() => {
+    const canvas = ref.current; if (!canvas) return;
+    const ctx = canvas.getContext('2d');
+    const loop = () => {
+      phase.draw(ctx, (fr.current % 180) / 180, phase.color);
+      fr.current++;
+      raf.current = requestAnimationFrame(loop);
+    };
+    fr.current = 0;
+    raf.current = requestAnimationFrame(loop);
+    return () => cancelAnimationFrame(raf.current);
+  }, [phase]);
+  return <canvas ref={ref} width={160} height={200} style={{display:'block',borderRadius:'4px'}} />;
+}
+
+// ─── Power meter bar ───────────────────────────────────────────────
+function PowerBar({ label, value, color, unit='' }) {
+  return (
+    <div style={{marginBottom:'10px'}}>
+      <div style={{display:'flex',justifyContent:'space-between',marginBottom:'5px'}}>
+        <span style={{fontFamily:'monospace',fontSize:'10px',color:'#666',letterSpacing:'1px'}}>{label}</span>
+        <span style={{fontFamily:'monospace',fontSize:'11px',fontWeight:'bold',color}}>{value}{unit}</span>
+      </div>
+      <div style={{height:'4px',background:'#1a1d22',borderRadius:'2px'}}>
+        <div style={{
+          height:'100%',width:`${value}%`,
+          background:`linear-gradient(90deg, ${color}88, ${color})`,
+          borderRadius:'2px',
+          boxShadow:`0 0 6px ${color}44`
+        }}/>
+      </div>
+    </div>
+  );
+}
+
+// ─── Main component ────────────────────────────────────────────────
+function SpikePower() {
+  const [activePhase, setActivePhase] = useState(0);
+  const [activeTraining, setActiveTraining] = useState(null);
+  const [activeTab, setActiveTab] = useState('technique');
+
+  const phase = PHASES[activePhase];
+
+  return (
+    <div style={{
+      minHeight:'100vh',
+      background:C.bg,
+      color:C.text,
+      fontFamily:"'Georgia', serif",
+      maxWidth:'700px',
+      margin:'0 auto',
+    }}>
+
+      {/* ── Header ── */}
+      <div style={{
+        background:C.surface,
+        borderBottom:`3px solid ${C.accent}`,
+        padding:'28px 24px 0',
+        position:'relative',
+        overflow:'hidden',
+      }}>
+        {/* Background text */}
+        <div style={{
+          position:'absolute',top:'-10px',right:'12px',
+          fontFamily:'monospace',fontSize:'80px',fontWeight:'900',
+          color:`${C.accent}06`,letterSpacing:'-4px',
+          userSelect:'none',pointerEvents:'none',
+        }}>POWER</div>
+
+        <div style={{fontFamily:'monospace',fontSize:'9px',letterSpacing:'4px',color:C.muted,marginBottom:'8px'}}>
+          VOLLEYBALL · SPIKE POWER SYSTEM
+        </div>
+        <div style={{fontSize:'28px',fontWeight:'bold',lineHeight:1.1,marginBottom:'6px'}}>
+          Hit the Ball
+          <span style={{color:C.accent,fontStyle:'italic'}}> Harder.</span>
+        </div>
+        <div style={{fontFamily:'monospace',fontSize:'11px',color:'#555',letterSpacing:'2px',marginBottom:'20px'}}>
+          MECHANICS · TECHNIQUE · TRAINING
+        </div>
+
+        {/* Power stats */}
+        <div style={{
+          display:'flex',gap:'0',marginBottom:'0',
+          borderTop:`1px solid ${C.border}`,
+          overflow:'hidden',
+        }}>
+          {[
+            {label:'KINETIC CHAIN',val:'5 LINKS',col:C.accent},
+            {label:'AVG ELITE SPEED',val:'70 MPH',col:C.gold},
+            {label:'WRIST ADDS',val:'+15 MPH',col:C.blue},
+          ].map((s,i)=>(
+            <div key={i} style={{
+              flex:1,padding:'12px 14px',
+              borderRight:i<2?`1px solid ${C.border}`:'none',
+            }}>
+              <div style={{fontFamily:'monospace',fontSize:'8px',color:C.muted,letterSpacing:'1px',marginBottom:'4px'}}>{s.label}</div>
+              <div style={{fontFamily:'monospace',fontSize:'14px',fontWeight:'bold',color:s.col}}>{s.val}</div>
+            </div>
+          ))}
+        </div>
+
+        {/* Tab nav */}
+        <div style={{display:'flex',marginTop:'1px',gap:'2px'}}>
+          {['technique','training','power chain'].map(t=>(
+            <button key={t} onClick={()=>setActiveTab(t)} style={{
+              padding:'10px 16px',
+              background:activeTab===t?C.accent:'transparent',
+              color:activeTab===t?'#fff':C.muted,
+              border:'none',cursor:'pointer',
+              fontSize:'9px',fontFamily:'monospace',
+              fontWeight:'900',letterSpacing:'2px',
+              textTransform:'uppercase',whiteSpace:'nowrap',
+            }}>{t}</button>
+          ))}
+        </div>
+      </div>
+
+      {/* ── TECHNIQUE TAB ── */}
+      {activeTab==='technique' && (
+        <div style={{padding:'20px'}}>
+          <div style={{fontFamily:'monospace',fontSize:'9px',letterSpacing:'3px',color:C.muted,marginBottom:'16px'}}>
+            5 PHASES OF A POWER SPIKE
+          </div>
+
+          {/* Phase selector */}
+          <div style={{display:'flex',gap:'3px',marginBottom:'20px',overflowX:'auto',scrollbarWidth:'none'}}>
+            {PHASES.map((ph,i)=>(
+              <button key={i} onClick={()=>setActivePhase(i)} style={{
+                flex:'0 0 auto',
+                padding:'8px 12px',
+                background:activePhase===i?`${ph.color}20`:C.dim,
+                border:`1px solid ${activePhase===i?ph.color:C.border}`,
+                color:activePhase===i?ph.color:C.muted,
+                cursor:'pointer',fontFamily:'monospace',
+                fontSize:'8px',fontWeight:'900',
+                letterSpacing:'1px',whiteSpace:'nowrap',
+                borderRadius:'2px',
+              }}>
+                {i+1}. {ph.label}
+              </button>
+            ))}
+          </div>
+
+          {/* Phase detail */}
+          <div style={{
+            display:'grid',
+            gridTemplateColumns:'160px 1fr',
+            gap:'20px',
+            alignItems:'start',
+            marginBottom:'16px',
+          }}>
+            {/* Canvas */}
+            <div style={{
+              background:'#08090b',
+              border:`1px solid ${phase.color}33`,
+              borderRadius:'4px',
+              padding:'10px',
+              display:'flex',
+              justifyContent:'center',
+            }}>
+              <PhaseCanvas phase={phase} />
+            </div>
+
+            {/* Info */}
+            <div>
+              <div style={{
+                fontFamily:'monospace',fontSize:'8px',
+                letterSpacing:'3px',color:phase.color,
+                marginBottom:'6px',
+              }}>PHASE {activePhase+1}</div>
+              <div style={{fontSize:'20px',fontWeight:'bold',marginBottom:'4px',lineHeight:1.2}}>
+                {phase.label}
+              </div>
+              <div style={{
+                fontSize:'13px',fontStyle:'italic',
+                color:phase.color,marginBottom:'12px',
+              }}>"{phase.tagline}"</div>
+              <div style={{fontSize:'13px',color:'#aaa',lineHeight:1.7,marginBottom:'14px'}}>
+                {phase.mechanic}
+              </div>
+              {/* Power tip */}
+              <div style={{
+                background:`${phase.color}0d`,
+                border:`1px solid ${phase.color}33`,
+                borderLeft:`3px solid ${phase.color}`,
+                padding:'12px',borderRadius:'2px',
+              }}>
+                <div style={{fontFamily:'monospace',fontSize:'8px',color:phase.color,letterSpacing:'2px',marginBottom:'6px'}}>
+                  ⚡ POWER TIP
+                </div>
+                <div style={{fontSize:'12px',color:'#bbb',lineHeight:1.65}}>
+                  {phase.powerTip}
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* Common mistakes */}
+          <div style={{
+            background:C.dim,
+            border:`1px solid ${C.border}`,
+            borderLeft:`3px solid #FF3355`,
+            padding:'16px',
+            marginBottom:'12px',
+          }}>
+            <div style={{fontFamily:'monospace',fontSize:'9px',color:'#FF3355',letterSpacing:'2px',marginBottom:'12px'}}>
+              ✗ COMMON MISTAKES THIS PHASE
+            </div>
+            {phase.mistakes.map((m,i)=>(
+              <div key={i} style={{
+                display:'flex',gap:'10px',
+                padding:'7px 0',
+                borderBottom:i<phase.mistakes.length-1?`1px solid ${C.border}`:'none',
+                fontSize:'12px',color:'#888',lineHeight:1.6,
+              }}>
+                <span style={{color:'#FF3355',fontFamily:'monospace',flexShrink:0}}>✗</span>
+                {m}
+              </div>
+            ))}
+          </div>
+
+          {/* Phase navigation */}
+          <div style={{display:'flex',gap:'8px',justifyContent:'space-between'}}>
+            <button
+              onClick={()=>setActivePhase(p=>Math.max(0,p-1))}
+              disabled={activePhase===0}
+              style={{
+                flex:1,padding:'10px',
+                background:activePhase===0?C.dim:`${C.border}88`,
+                border:`1px solid ${activePhase===0?C.border:C.muted}`,
+                color:activePhase===0?'#333':C.muted,
+                fontFamily:'monospace',fontSize:'9px',cursor:activePhase===0?'default':'pointer',
+                letterSpacing:'2px',
+              }}
+            >← PREV PHASE</button>
+            <button
+              onClick={()=>setActivePhase(p=>Math.min(PHASES.length-1,p+1))}
+              disabled={activePhase===PHASES.length-1}
+              style={{
+                flex:1,padding:'10px',
+                background:activePhase===PHASES.length-1?C.dim:`${phase.color}22`,
+                border:`1px solid ${activePhase===PHASES.length-1?C.border:phase.color}`,
+                color:activePhase===PHASES.length-1?'#333':phase.color,
+                fontFamily:'monospace',fontSize:'9px',cursor:activePhase===PHASES.length-1?'default':'pointer',
+                letterSpacing:'2px',fontWeight:'bold',
+              }}
+            >NEXT PHASE →</button>
+          </div>
+        </div>
+      )}
+
+      {/* ── TRAINING TAB ── */}
+      {activeTab==='training' && (
+        <div style={{padding:'20px'}}>
+          <div style={{fontFamily:'monospace',fontSize:'9px',letterSpacing:'3px',color:C.muted,marginBottom:'6px'}}>
+            SPIKE POWER TRAINING DRILLS
+          </div>
+          <div style={{fontSize:'13px',color:'#666',marginBottom:'20px',lineHeight:1.6}}>
+            6 exercises specifically targeting the muscles and movements that create hitting power.
+          </div>
+
+          <div style={{display:'flex',flexDirection:'column',gap:'3px'}}>
+            {TRAINING.map((ex,i)=>(
+              <div key={ex.id}>
+                <div
+                  onClick={()=>setActiveTraining(activeTraining===ex.id?null:ex.id)}
+                  style={{
+                    background:activeTraining===ex.id?`${ex.color}12`:C.dim,
+                    border:`1px solid ${activeTraining===ex.id?ex.color:C.border}`,
+                    borderLeft:`3px solid ${ex.color}`,
+                    padding:'16px',cursor:'pointer',
+                    transition:'all .2s',
+                  }}
+                >
+                  <div style={{display:'flex',alignItems:'center',gap:'12px'}}>
+                    <div style={{fontSize:'20px',flexShrink:0}}>{ex.icon}</div>
+                    <div style={{flex:1}}>
+                      <div style={{display:'flex',alignItems:'center',gap:'8px',marginBottom:'3px'}}>
+                        <span style={{fontFamily:'monospace',fontSize:'8px',color:ex.color,letterSpacing:'2px',background:`${ex.color}15`,padding:'2px 6px',borderRadius:'2px'}}>
+                          {ex.category}
+                        </span>
+                      </div>
+                      <div style={{fontSize:'15px',fontWeight:'bold',marginBottom:'3px'}}>{ex.title}</div>
+                      <div style={{fontFamily:'monospace',fontSize:'11px',color:'#555'}}>{ex.description}</div>
+                    </div>
+                    <div style={{textAlign:'right',flexShrink:0}}>
+                      <div style={{fontFamily:'monospace',fontSize:'13px',fontWeight:'bold',color:ex.color}}>{ex.sets}</div>
+                      <div style={{fontFamily:'monospace',fontSize:'10px',color:C.muted,marginTop:'4px'}}>
+                        {activeTraining===ex.id?'▲ HIDE':'▼ HOW TO'}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Expanded how-to */}
+                {activeTraining===ex.id && (
+                  <div style={{
+                    background:'#0a0c0f',
+                    border:`1px solid ${ex.color}33`,
+                    borderTop:'none',
+                    borderLeft:`3px solid ${ex.color}`,
+                    padding:'0 16px 16px',
+                  }}>
+                    <div style={{
+                      background:`${ex.color}0a`,
+                      border:`1px solid ${ex.color}22`,
+                      padding:'12px 14px',
+                      margin:'0 0 14px',
+                    }}>
+                      <div style={{fontFamily:'monospace',fontSize:'8px',color:ex.color,letterSpacing:'2px',marginBottom:'5px'}}>⚡ WHY THIS BUILDS POWER</div>
+                      <div style={{fontSize:'12px',color:'#aaa',lineHeight:1.65}}>{ex.powerKey}</div>
+                    </div>
+
+                    <div style={{fontFamily:'monospace',fontSize:'9px',color:C.muted,letterSpacing:'2px',marginBottom:'10px'}}>HOW TO DO IT</div>
+                    {ex.howTo.map((step,si)=>(
+                      <div key={si} style={{
+                        display:'flex',gap:'12px',
+                        padding:'9px 0',
+                        borderBottom:si<ex.howTo.length-1?`1px solid ${C.border}`:'none',
+                      }}>
+                        <div style={{
+                          minWidth:'22px',height:'22px',borderRadius:'50%',
+                          background:`${ex.color}18`,border:`1px solid ${ex.color}44`,
+                          display:'flex',alignItems:'center',justifyContent:'center',
+                          fontFamily:'monospace',fontSize:'9px',fontWeight:'bold',
+                          color:ex.color,flexShrink:0,marginTop:'1px',
+                        }}>{si+1}</div>
+                        <div>
+                          <div style={{fontSize:'11px',fontWeight:'bold',color:'#ddd',marginBottom:'3px',fontFamily:'monospace',letterSpacing:'0.5px'}}>{step.step}</div>
+                          <div style={{fontSize:'12px',color:'#888',lineHeight:1.65}}>{step.desc}</div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* ── POWER CHAIN TAB ── */}
+      {activeTab==='power chain' && (
+        <div style={{padding:'20px'}}>
+          <div style={{fontFamily:'monospace',fontSize:'9px',letterSpacing:'3px',color:C.muted,marginBottom:'16px'}}>
+            THE KINETIC CHAIN — WHERE POWER COMES FROM
+          </div>
+
+          <div style={{
+            background:C.dim,border:`1px solid ${C.border}`,
+            padding:'16px',marginBottom:'16px',
+          }}>
+            <div style={{fontSize:'13px',color:'#aaa',lineHeight:1.75}}>
+              A volleyball spike is not an arm exercise. Power travels upward like a crack of a whip — starting at the ground and multiplying at each joint. Break the chain anywhere and you lose velocity.
+            </div>
+          </div>
+
+          {/* Chain links */}
+          {[
+            {num:1,name:'GROUND PUSH',muscle:'Legs & Calves',color:C.green,pct:25,desc:'Your feet push into the ground during the jump. Ground reaction force launches your entire body upward — this is where it all starts.', cue:'Drive THROUGH the floor, not just off it'},
+            {num:2,name:'HIP ROTATION',muscle:'Glutes & Core',color:C.gold,pct:35,desc:'As you peak in the air, your hips rotate explosively toward the net. This rotation speeds up everything above it through angular momentum.', cue:'Hips lead the shoulder by a half-second'},
+            {num:3,name:'TRUNK ROTATION',muscle:'Obliques & Lats',color:C.accent,pct:55,desc:'Your obliques and lats whip your torso through. Your chest opens toward the ball — this is the largest single power contributor in the chain.', cue:'Feel your rib cage rotate, not just your shoulder'},
+            {num:4,name:'SHOULDER DRIVE',muscle:'Deltoid & Rotator Cuff',color:C.accent,pct:75,desc:'The shoulder joint transfers all the trunk rotation into linear arm speed. Your arm is passive here — it rides the rotation wave.', cue:'Elbow leads, hand trails — not the other way'},
+            {num:5,name:'WRIST SNAP',muscle:'Forearm Flexors',color:C.blue,pct:100,desc:'The final amplifier. A fast wrist snap adds 5–15 mph to ball speed and creates the topspin that brings the ball down into the court.', cue:'Snap happens AFTER contact, not during'},
+          ].map((link,i)=>(
+            <div key={i} style={{display:'flex',gap:'16px',alignItems:'stretch',marginBottom:'3px'}}>
+              {/* Timeline connector */}
+              <div style={{display:'flex',flexDirection:'column',alignItems:'center',minWidth:'32px'}}>
+                <div style={{
+                  width:'32px',height:'32px',borderRadius:'50%',
+                  background:`${link.color}20`,border:`2px solid ${link.color}`,
+                  display:'flex',alignItems:'center',justifyContent:'center',
+                  fontFamily:'monospace',fontSize:'12px',fontWeight:'bold',
+                  color:link.color,flexShrink:0,marginTop:'14px',
+                }}>{link.num}</div>
+                {i<4&&<div style={{width:'2px',flex:1,background:`linear-gradient(${link.color}44,${C.border})`,marginTop:'4px'}}/>}
+              </div>
+
+              {/* Card */}
+              <div style={{
+                flex:1,background:C.dim,border:`1px solid ${C.border}`,
+                borderLeft:`3px solid ${link.color}`,padding:'14px',
+                marginBottom:'3px',
+              }}>
+                <div style={{display:'flex',justifyContent:'space-between',alignItems:'flex-start',marginBottom:'8px'}}>
+                  <div>
+                    <div style={{fontFamily:'monospace',fontSize:'8px',color:link.color,letterSpacing:'2px',marginBottom:'3px'}}>{link.name}</div>
+                    <div style={{fontSize:'16px',fontWeight:'bold'}}>{link.muscle}</div>
+                  </div>
+                  <div style={{
+                    fontFamily:'monospace',fontSize:'18px',fontWeight:'bold',
+                    color:link.color,
+                  }}>{link.pct}%</div>
+                </div>
+
+                {/* Power accumulation bar */}
+                <div style={{height:'3px',background:'#1a1d22',borderRadius:'2px',marginBottom:'10px'}}>
+                  <div style={{
+                    height:'100%',width:`${link.pct}%`,
+                    background:`linear-gradient(90deg,${link.color}55,${link.color})`,
+                    borderRadius:'2px',boxShadow:`0 0 6px ${link.color}44`,
+                  }}/>
+                </div>
+
+                <div style={{fontSize:'12px',color:'#888',lineHeight:1.65,marginBottom:'10px'}}>
+                  {link.desc}
+                </div>
+
+                <div style={{
+                  display:'flex',gap:'8px',alignItems:'center',
+                  background:`${link.color}0a`,padding:'8px 10px',
+                }}>
+                  <span style={{color:link.color,fontSize:'12px'}}>→</span>
+                  <span style={{fontFamily:'monospace',fontSize:'10px',color:link.color,letterSpacing:'0.5px'}}>
+                    {link.cue}
+                  </span>
+                </div>
+              </div>
+            </div>
+          ))}
+
+          {/* Power percentages summary */}
+          <div style={{
+            background:C.dim,border:`1px solid ${C.border}`,
+            padding:'18px',marginTop:'8px',
+          }}>
+            <div style={{fontFamily:'monospace',fontSize:'9px',color:C.muted,letterSpacing:'3px',marginBottom:'14px'}}>
+              POWER SOURCE BREAKDOWN
+            </div>
+            <PowerBar label="LEGS & JUMP" value={25} color={C.green} unit="%" />
+            <PowerBar label="HIP ROTATION" value={35} color={C.gold} unit="%" />
+            <PowerBar label="TRUNK / CORE" value={55} color={C.accent} unit="%" />
+            <PowerBar label="SHOULDER DRIVE" value={20} color='#ff8855' unit="%" />
+            <PowerBar label="WRIST SNAP" value={15} color={C.blue} unit="%" />
+            <div style={{
+              marginTop:'14px',padding:'12px',
+              background:`${C.accent}0a`,border:`1px solid ${C.accent}22`,
+            }}>
+              <div style={{fontFamily:'monospace',fontSize:'9px',color:C.accent,letterSpacing:'2px',marginBottom:'6px'}}>
+                THE BOTTOM LINE
+              </div>
+              <div style={{fontSize:'12px',color:'#888',lineHeight:1.65}}>
+                Most players train their arm and ignore their hips and core. Flipping that ratio — training hip and trunk rotation first — is the fastest path to dramatically more hitting power.
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+    </div>
+  );
+}
+
+
+    // Mount both apps
+    ReactDOM.createRoot(document.getElementById('root-spike')).render(<SpikePower />);
+    ReactDOM.createRoot(document.getElementById('root-vert')).render(<VertPro />);
   </script>
 
   <script>
-    function show(app, btn) {
+    function showApp(app, btn) {
       document.getElementById('root-spike').style.display = app === 'spike' ? 'block' : 'none';
       document.getElementById('root-vert').style.display  = app === 'vert'  ? 'block' : 'none';
       document.querySelectorAll('#nav button').forEach(b => b.classList.remove('active'));
