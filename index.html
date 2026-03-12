@@ -3,16 +3,72 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Spike Power</title>
+  <title>Volleyball Training</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { background: #07080a; font-family: Georgia, serif; }
+    #nav {
+      display: flex;
+      background: #0d0f12;
+      border-bottom: 2px solid #1a1d22;
+      position: sticky;
+      top: 0;
+      z-index: 9999;
+    }
+    #nav button {
+      flex: 1;
+      padding: 16px;
+      background: transparent;
+      border: none;
+      color: #4a4a55;
+      font-family: monospace;
+      font-size: 10px;
+      font-weight: 900;
+      letter-spacing: 2px;
+      text-transform: uppercase;
+      cursor: pointer;
+      border-bottom: 2px solid transparent;
+      transition: all .2s;
+    }
+    #nav button.active {
+      color: #FF4D00;
+      border-bottom: 2px solid #FF4D00;
+      background: #FF4D0010;
+    }
+    #root-spike { display: block; }
+    #root-vert  { display: none;  }
+  </style>
 </head>
 <body>
-  <div id="root"></div>
+
+  <div id="nav">
+    <button class="active" onclick="show('spike', this)">⚡ Spike Power</button>
+    <button onclick="show('vert', this)">📈 Vert Pro</button>
+  </div>
+
+  <div id="root-spike"></div>
+  <div id="root-vert"></div>
+
   <script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.2/babel.min.js"></script>
+
   <script type="text/babel" src="SpikePower.jsx"></script>
+  <script type="text/babel" src="VertPro.jsx"></script>
+
   <script type="text/babel">
-    ReactDOM.createRoot(document.getElementById('root')).render(React.createElement(SpikePower.default));
+    ReactDOM.createRoot(document.getElementById('root-spike')).render(React.createElement(SpikePower.default));
+    ReactDOM.createRoot(document.getElementById('root-vert')).render(React.createElement(VertPro.default));
   </script>
+
+  <script>
+    function show(app, btn) {
+      document.getElementById('root-spike').style.display = app === 'spike' ? 'block' : 'none';
+      document.getElementById('root-vert').style.display  = app === 'vert'  ? 'block' : 'none';
+      document.querySelectorAll('#nav button').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+    }
+  </script>
+
 </body>
 </html>
